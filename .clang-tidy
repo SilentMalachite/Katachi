@@ -1,0 +1,21 @@
+# docs/phases.md §3 の指定どおり。
+# 有効: bugprone-* cppcoreguidelines-* modernize-* performance-* readability-* misc-*
+# 除外可として明示されているもの: cppcoreguidelines-pro-bounds-* / modernize-use-trailing-return-type
+Checks: >
+  -*,
+  bugprone-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  misc-*,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -modernize-use-trailing-return-type
+
+# 警告を残したまま「通った」と報告できないようにする（docs/phases.md §3）。
+WarningsAsErrors: '*'
+
+# 自前のヘッダのみ診断する。Qt のヘッダは対象外。
+HeaderFilterRegex: '.*/src/.*'
