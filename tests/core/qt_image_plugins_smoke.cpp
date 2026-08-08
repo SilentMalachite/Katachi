@@ -11,14 +11,17 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("Qt が読み込める画像フォーマットが存在し、PNG を含む", "[smoke]") {
+// テスト名は ASCII に限る。catch_discover_tests はテスト名を
+// そのままフィルタ引数として実行ファイルへ渡すため、非 ASCII 名は
+// Windows のコンソール encoding で化けて "No test cases matched" になる。
+TEST_CASE("QImageReader supports at least PNG", "[smoke]") {
     const QList<QByteArray> readable = QImageReader::supportedImageFormats();
 
     REQUIRE_FALSE(readable.isEmpty());
     REQUIRE(readable.contains(QByteArrayLiteral("png")));
 }
 
-TEST_CASE("Qt が書き出せる画像フォーマットが存在し、PNG を含む", "[smoke]") {
+TEST_CASE("QImageWriter supports at least PNG", "[smoke]") {
     const QList<QByteArray> writable = QImageWriter::supportedImageFormats();
 
     REQUIRE_FALSE(writable.isEmpty());
