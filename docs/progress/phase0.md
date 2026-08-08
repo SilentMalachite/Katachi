@@ -313,3 +313,77 @@ Windows が `D:\a\Katachi\Qt\6.8.3\msvc2022_64` で、いずれも 6.8.3 に固�
    `docs/format-matrix.md` の自動生成、`src/core` 作成後に
    `invariant.inv3a` / `invariant.inv4` が空振りでなくなることの確認。
 4. **Windows の実機確認は引き続き未了。** 実機を用意できるまで「CI のみ」の状態が続く。
+
+---
+
+## 2026-08-09 — PR #1 を main へマージ。Phase 0 クローズ
+
+### 実施内容
+
+`phase0` → `main` の PR を作成しマージした。「1 Phase = 1 ブランチ = 1 PR」（`phases.md` §1）の完了。
+
+| 項目 | 内容 |
+|---|---|
+| PR | [#1](https://github.com/SilentMalachite/Katachi/pull/1) |
+| 差分 | 28 ファイル（追加 23 / 変更 1 / リネーム 4）、+1090 行、8 コミット |
+| マージ方式 | **merge commit**（squash しない） |
+| マージコミット | `7732263` |
+
+squash を採らなかったのは、`agent-protocol.md` §6「1 コミット = 1 つの意味のある変更」に従って
+積んだ 8 コミットの粒度を `main` に残すため。
+
+### 変更ファイル
+
+**追加 / 変更 / 削除ともになし。** 本エントリは PR 作成・マージの記録であり、コードの変更を伴わない。
+
+### 追加・変更したテスト
+
+**なし。** 既存の 16 テストのまま。
+
+### 品質ゲートの実行結果
+
+マージ前後で計 3 回、CI 全ジョブの green を確認した。
+
+| タイミング | run | 結果 |
+|---|---|---|
+| `phase0` への push（`f780d1f`） | 31284036906 | 4 ジョブ success |
+| PR 作成による `pull_request` トリガ | 31284242195 | 4 ジョブ success |
+| **マージ後の `main`（`7732263`）** | **31284444275** | **4 ジョブ success** |
+
+マージ直前の `gh pr checks` は **8 / 8 pass、pending・fail は 0**、
+`mergeStateStatus=CLEAN` を確認してからマージした。pending のままマージしていない。
+
+マージコミットに対する CI（3 番目）も green であり、`main` が壊れていないことを確認済み。
+
+### 推測で埋めた箇所
+
+**なし。** すべて CI と `gh` の出力で確認した事実。
+
+### 作業中に起きた紛らわしい事象（記録として残す）
+
+`gh pr merge` の直後に exit 1 が出たが、**マージの失敗ではない。**
+同じコマンド列に続けて書いた確認用の `gh pr view --json merged` が、
+存在しないフィールド名を指定していたことによるもの。
+マージ自体は成功していた（`state=MERGED` / `mergedAt=2026-08-08T23:38:52Z`）。
+
+同様に、初回 CI の待機に使った `gh run watch --exit-status` は
+**run が failure でも exit 0 を返した。** 終了コードを信じず
+`gh run view --json conclusion` で確認したため、2 件の失敗に気づけた。
+**以後、CI の成否は `gh run view` の `conclusion` で判定する。**
+
+### Phase 0 の最終状態
+
+`phases.md` §4 の受け入れ基準 10 項目すべて達成。**Phase 0 はクローズする。**
+
+### 残課題 / 次にやること
+
+1. **`.clang-format` に `AccessModifierOffset: -4` を足す提案の可否判断。** 未実施のまま持ち越す。
+2. **Windows の実機起動確認。** CI ではビルド + テストが通っているが実機未確認。
+   実機を用意できるまで解消しない。
+3. **`phase0` ブランチの削除。** 未実施。指示を待つ。
+4. **Phase 1 の計画提示と承認取得。** 未着手。Phase 1 着手時の宿題は次のとおり。
+   - ADR-0002（コア層全体の `noexcept` と確保失敗の方針）
+   - `phases.md` §5.2 のメタデータ保持方針 — 使用する Qt の EXIF / ICC の実挙動を
+     公式ドキュメントで確認してから判断する。**今は推測しない**
+   - `docs/format-matrix.md` のビルド時自動生成
+   - `src/core` 作成後、`invariant.inv3a` / `invariant.inv4` が空振りでなくなることの確認
