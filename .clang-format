@@ -1,0 +1,5 @@
+# docs/phases.md §3 の指定どおり。これ以外の項目は LLVM 既定のままにする。
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+PointerAlignment: Left

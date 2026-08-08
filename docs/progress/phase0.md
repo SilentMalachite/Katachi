@@ -71,3 +71,245 @@
 - `docs/format-matrix.md` の自動生成 → Phase 1
 - 追加コーデックの調査・導入 → Phase 3
 - 配布・署名・公証 → Phase 4
+
+---
+
+## 2026-08-09 — Phase 0 実装（ローカル作業完了）
+
+### 実施内容
+
+上記「着手予定」の 1〜10 を実施した。ブランチは `phase0`。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `.gitignore` | `build/` `CMakeUserPresets.json` `compile_commands.json` 等 |
+| `.clang-format` | LLVM ベース / IndentWidth 4 / ColumnLimit 100 / PointerAlignment Left |
+| `.clang-tidy` | `phases.md` §3 の 6 グループ。除外は明示された 2 種のみ |
+| `CMakeLists.txt` | C++20 / 警告ゼロ / `katachi_warnings`・`katachi_sanitizers` の INTERFACE ターゲット |
+| `CMakePresets.json` | `dev` / `asan`。Qt は `$env{QT_ROOT_DIR}` 経由 |
+| `cmake/QualityGates.cmake` | スキャナ 14 テストの登録 |
+| `src/app/CMakeLists.txt` | `katachi_app`（静的ライブラリ）+ `katachi`（実行ファイル） |
+| `src/app/MainWindow.hpp` / `.cpp` | 空のメインウィンドウ |
+| `src/app/main.cpp` | 薄いエントリポイント |
+| `tests/CMakeLists.txt` | Catch2 v3.15.3 を固定タグ + `FIND_PACKAGE_ARGS` |
+| `tests/main.cpp` | `QCoreApplication` を構築してから `Catch::Session` を回す |
+| `tests/core/qt_image_plugins_smoke.cpp` | Qt 画像プラグインの smoke |
+| `tests/invariants/scan_invariants.cmake` | 不変条件スキャナ本体 |
+| `tests/invariants/fixtures/violations/inv{1,2,3a,3b,4,5,6}/` | 故意の違反サンプル 7 件 |
+| `.github/workflows/ci.yml` | macOS / Windows |
+| `docs/licenses.md` / `docs/adr/0001-ui-toolkit.md` | 受け入れ基準の 2 項目 |
+
+**移動**: `phases.md` / `spec-core.md` / `cpp-conventions.md` / `agent-protocol.md` → `docs/` 直下
+
+**削除**: なし
+
+### 追加・変更したテスト（16 件）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `invariant.inv1` | `src/` に `enable_if` / `void_t` が 0 件 | pass |
+| `invariant.inv2` | `src/` に無制約テンプレートが 0 件 | pass |
+| `invariant.inv3a` | `src/core` に文字列リテラルが 0 件（`FormatId.hpp` 除外） | pass（※下記） |
+| `invariant.inv3b` | `src/app` の文字列リテラルにフォーマット名が 0 件 | pass |
+| `invariant.inv4` | `src/core` が `io/` / `QtWidgets` を include していない | pass（※下記） |
+| `invariant.inv5` | `src/` が `QtNetwork` / `QNetwork*` を include していない | pass |
+| `invariant.inv6` | `src/` に `NOLINT` / 警告抑制プラグマが 0 件 | pass |
+| `invariant.inv{1..6}.detects_violation`（7 本） | 違反フィクスチャに対し**非ゼロ終了する** | pass |
+| smoke 2 本 | `QImageReader` / `QImageWriter` の対応形式が空でなく PNG を含む | pass |
+
+**※ `invariant.inv3a` と `invariant.inv4` は、Phase 0 時点で `src/core` が存在しないため
+走査対象 0 ファイルで通っている（空振り）。** 実質的な検出能力は
+`detects_violation` 側で確認しており、Phase 1 で `src/core` を作った時点で実効性を持つ。
+「全部 green」という表現だけで済ませないこと。
+
+スキャナ実装時、7 種すべてが**意図と違う理由**（相対パスによる `file(RELATIVE_PATH)` エラー）で
+落ちていた。`phases.md` §2.1-2「意図した理由で失敗することを確認する」の手順で検出し、
+`file(REAL_PATH)` による正規化で修正した。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。`build/` を削除した状態から通しで実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --preset dev` | exit 0 |
+| 2 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 3 | `ctest --preset dev --output-on-failure` | exit 0 / **16 / 16 pass** |
+| 4 | `clang-format --dry-run --Werror $(git ls-files '*.cpp' '*.hpp')` | exit 0（clang-format 22.1.8） |
+| 5 | `clang-tidy -p build/dev $(git ls-files 'src/*.cpp')` | exit 0（clang-tidy 22.1.8） |
+| 6 | `cmake --preset asan` | exit 0 |
+| 7 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 8 | `ctest --preset asan --output-on-failure` | exit 0 / **16 / 16 pass** |
+
+**CI では未実行。** リモート未作成のため（下記「残課題」1）。
+
+### 実機確認
+
+- **macOS 14 / arm64（実機）: 確認済み。** アプリを起動し、Window Server の窓リスト
+  （`CGWindowListCopyWindowInfo`）で `owner=katachi layer=0 size=960x632` の
+  画面上ウィンドウを確認した。標準エラー出力は空。
+  ウィンドウ**題名**は Screen Recording 権限が無いため取得できず未確認。
+- **Windows: 実機未確認。** 実機を持たないため。CI も未実行のため、現時点では
+  **ビルド確認すらできていない**（「CI ビルドのみ」ですらない）。
+
+### 推測で埋めた箇所
+
+`agent-protocol.md` §1 の 1〜4 で決まらず、5（一般的な慣習）に頼った箇所。
+
+1. **CI の前提 3 点は未検証。** いずれも push するまで確かめられない。
+   - `jurplel/install-qt-action@v4` が `QT_ROOT_DIR` を環境変数として設定すること
+   - `windows-2022` ランナーに `choco` があること
+   - `ilammy/msvc-dev-cmd@v1` で MSVC 環境が整うこと
+2. **`.clang-tidy` の `WarningsAsErrors: '*'` と `HeaderFilterRegex: '.*/src/.*'`。**
+   `phases.md` §3 はチェック集合のみを指定しており、この 2 項目の指定は無い。
+   前者は「警告を残したまま通ったと報告できないようにする」ため、
+   後者は Qt のヘッダを診断対象から外すために入れた。
+3. **`src/app` の識別子命名規則。** 規約に指定が無いため Qt 風の lowerCamelCase を採った
+   （`initialWindowWidth` 等）。`readability-identifier-naming` は無設定のため強制されていない。
+4. **CI で clang-format / clang-tidy を macOS ジョブでのみ実行している。**
+   `phases.md` §4 は「品質ゲートが全て CI で走り」としか書いておらず、
+   OS ごとの実行要否の指定が無い。整形結果は OS に依存しないため 1 回で足りると判断した。
+
+以下は**推測ではなく一次情報で確認した**もの（区別のため記載する）。
+
+- Qt 6.8 系の最新パッチ版が **6.8.3** であること（`download.qt.io` の索引を mac_x64 /
+  windows_x86 の両方で確認。6.8.0〜6.8.3 が存在）
+- `clang-format` / `clang-tidy` の **22.1.8** が PyPI に存在し、macOS arm64 ホイールがあること
+  （ローカル開発機の Homebrew LLVM 22.1.8 と同一版に固定できる）
+- Catch2 の最新タグが **v3.15.3** であること（GitHub API）
+
+### 指示書に無いが必要と判断して入れたもの（承認済みの追加スコープ以外）
+
+- **`CMAKE_OSX_SYSROOT` の明示設定（`CMakeLists.txt` 冒頭）。**
+  Apple clang は SDK を暗黙に見つけるが、品質ゲートで使う Homebrew LLVM の clang-tidy は
+  見つけられず `<type_traits>` の解決に失敗し、**誤検出**（`misc-const-correctness` が
+  `show()` を const 可と誤判定）を出した。`compile_commands.json` に `-isysroot` を
+  含めることで、`CLAUDE.md` 記載のゲートコマンドを**一字も変えずに**通せるようにした。
+  `--extra-arg` を足す案は、ゲートコマンドが指示書と食い違うため採らなかった。
+
+### 提案（実装していない。判断を仰ぐ）
+
+`CLAUDE.md` 停止条件 9 に従い、実装せず提案として記す。
+
+1. **`.clang-format` に `AccessModifierOffset: -4` を追加したい。**
+   現在の指定（LLVM ベース + `IndentWidth: 4`）の帰結として、LLVM 既定の
+   `AccessModifierOffset: -2` が効き、`public:` が **2 スペース**の位置に来る
+   （本文は 4 スペース）。半端な見た目になる。`-4` にすると `public:` が
+   カラム 0 に揃う。`phases.md` §3 は 4 項目のみを指定しているため、
+   独断では変更していない。
+
+### 残課題 / 次にやること
+
+1. **GitHub リモートの作成と push（利用者側）。** これが済むまで Phase 0 受け入れ基準
+   「GitHub Actions が macOS / Windows の両方でビルド + テストを通す」は**未達**。
+   push 後に CI の結果を本ファイルへ追記する。上記「推測で埋めた箇所」1 の 3 点は
+   初回 CI で判明する。
+2. **Windows の実機／CI 確認。** 1 の完了後に「CI ビルドのみ・実機未確認」の形で確定させる。
+3. **`docs/format-matrix.md` の自動生成** → Phase 1。`.gitignore` に登録済み。
+4. **`phases.md` §5.2 のメタデータ保持方針**（`MetadataPolicy::PreserveAll` を Phase 1 で
+   実装するか Phase 3 に送るか）→ Phase 1 着手時に、使用する Qt の EXIF / ICC の実挙動を
+   公式ドキュメントで確認してから判断する。**今は推測しない。**
+5. **ADR-0002（`noexcept` と確保失敗）** → Phase 1。
+6. **`src/core` 作成後、`invariant.inv3a` / `invariant.inv4` が空振りでなくなることを確認する。**
+
+---
+
+## 2026-08-09 — リモートへ push、CI が検出した不具合の修正、Phase 0 完了
+
+### 実施内容
+
+`https://github.com/SilentMalachite/Katachi.git` へ `main` と `phase0` を push した。
+初回 CI（run 31280911440）が **2 件の実際の移植性バグ**を検出したため修正し、
+再実行（run 31283909573 / commit `d7a89f1`）で 4 ジョブすべて success になった。
+
+### 初回 CI が検出した不具合と修正
+
+**1. `clang-tidy` の `misc-include-cleaner` が CI でのみ違反を報告した**
+
+```
+src/app/main.cpp:9:42: error: no header providing "QStringLiteral" is directly included
+```
+
+`QStringLiteral` マクロの定義ヘッダが Qt 6.8 と 6.11 で異なるため、
+**ローカル（6.11）では通り、CI（6.8）で落ちた。**
+`phases.md` §1.5 が「ローカルが 6.11 でも CI は下限に合わせる。6.8 以降に入った API を
+無自覚に使う事故を CI で検出するため」とした仕組みが、初回から機能した。
+
+修正: `QStringLiteral("Katachi")` → `QString::fromUtf8("Katachi")`。
+`QString::fromUtf8` は `<QString>` が提供するため、6.8 / 6.11 の双方で安定する。
+`misc-include-cleaner` を除外する案は採らなかった（`phases.md` §3 が除外可としているのは
+`cppcoreguidelines-pro-bounds-*` と `modernize-use-trailing-return-type` の 2 種のみ）。
+
+**2. Windows で smoke テスト 2 件が失敗した**
+
+```
+No test cases matched '"Qt ???????????????????PNG ???"'
+88% tests passed, 2 tests failed out of 16
+```
+
+`catch_discover_tests` はテスト名をそのままフィルタ引数として実行ファイルへ渡すため、
+日本語のテスト名が Windows のコンソール encoding で `?` に化けて一致しなくなっていた。
+**私が書いたテストの移植性バグであり、テストの期待値の問題ではない。**
+
+修正: テスト名を ASCII にした。
+`QImageReader supports at least PNG` / `QImageWriter supports at least PNG`。
+説明は同ファイル内のコメントに日本語で残した。以後、**ctest に登録される名前は ASCII に限る。**
+
+### 品質ゲートの実行結果（CI・run 31283909573）
+
+| ジョブ | 結果 |
+|---|---|
+| ビルド + テスト (macOS 14 / arm64、Qt 6.8.3) | **success / 16 / 16 pass** |
+| ビルド + テスト (Windows 2022 / MSVC、Qt 6.8.3 msvc2022_64) | **success / 16 / 16 pass** |
+| clang-format + clang-tidy (macOS、ともに 22.1.8) | **success** |
+| ASan + UBSan (macOS) | **success / 16 / 16 pass** |
+
+CI ログ全体（2283 行）に `warning:` / `error:` を含む行は **0 行**。
+`QT_ROOT_DIR` は macOS が `/Users/runner/work/Katachi/Qt/6.8.3/macos`、
+Windows が `D:\a\Katachi\Qt\6.8.3\msvc2022_64` で、いずれも 6.8.3 に固定されていることを
+ログで確認した。
+
+### 前エントリの「推測で埋めた箇所」1 の確定
+
+初回 CI の Windows ジョブが ctest まで到達し 16 中 14 が pass していたことから、
+下記 3 点は**いずれも正しかった**と確認できた（推測ではなくなった）。
+
+- `jurplel/install-qt-action@v4` が `QT_ROOT_DIR` を設定する
+- `windows-2022` ランナーに `choco` がある
+- `ilammy/msvc-dev-cmd@v1` で MSVC 環境が整う（`/W4 /WX` 付きビルドが警告ゼロで通過）
+
+### 推測で埋めた箇所
+
+**なし。** 本エントリの記述はすべて CI のログで確認した事実に基づく。
+
+なお、前エントリに記載した推測 2〜4（`.clang-tidy` の 2 設定、識別子命名規則、
+リンタを macOS ジョブでのみ実行）は、CI が green になったことで
+「動作する」ことは確認できたが、**指示書に根拠が無い判断であることは変わらない。**
+
+### Phase 0 受け入れ基準（`phases.md` §4）
+
+| 項目 | 状態 |
+|---|---|
+| GitHub Actions が macOS / Windows の両方でビルド + テストを通す | **達成**（run 31283909573） |
+| CI の Qt が 6.8 系 LTS に固定されている | **達成**（6.8.3。ログで確認） |
+| 実機で空のメインウィンドウが起動することを、確認できた OS について確認する | **達成**（macOS 14 / arm64 実機） |
+| 実機確認していない OS は「CI ビルドのみ・実機未確認」と明記する | **達成**（Windows。CI でビルド + テストは通ったが**実機未確認**） |
+| 不変条件スキャナ 6 種が実装され、`ctest` で走る | **達成**（INV3 を core / app に分けた 7 検査 + 検出確認 7 本 = 14 テスト） |
+| 品質ゲートが全て CI で走り、警告ゼロ | **達成** |
+| `.clang-format` が §3 の設定で置かれている | **達成** |
+| `docs/adr/0001-ui-toolkit.md` に Qt Widgets 採用の根拠がある | **達成** |
+| `docs/licenses.md` に Qt の LGPL 条件と動的リンクである旨が記載されている | **達成** |
+| 4 つの参照文書が `docs/` 直下にあり、`CLAUDE.md` のみリポジトリ直下にある | **達成** |
+
+**Phase 0 は完了した。**
+
+### 残課題 / 次にやること
+
+1. **`phase0` → `main` の PR 作成とマージ**（1 Phase = 1 ブランチ = 1 PR）。未実施。
+2. **前エントリの提案（`.clang-format` に `AccessModifierOffset: -4`）の可否判断。** 未実施。
+3. Phase 1 着手時: ADR-0002（`noexcept` と確保失敗）、`phases.md` §5.2 のメタデータ保持方針、
+   `docs/format-matrix.md` の自動生成、`src/core` 作成後に
+   `invariant.inv3a` / `invariant.inv4` が空振りでなくなることの確認。
+4. **Windows の実機確認は引き続き未了。** 実機を用意できるまで「CI のみ」の状態が続く。
