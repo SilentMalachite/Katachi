@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "phase*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # docs/phases.md §1.5: CI の Qt は 6.8 系 LTS に固定する。
+  # ローカルが 6.11 でも CI は下限に合わせ、6.8 より後に入った API を
+  # 無自覚に使う事故を CI で検出する。
+  # 6.8 系の最新パッチ版は download.qt.io の索引で確認した（6.8.0〜6.8.3）。
+  QT_VERSION: 6.8.3
+  # docs/phases.md §1.5 と同じ理由でリンタも版を固定する。
+  # ローカル開発機の Homebrew LLVM と同一版に合わせ、整形結果の食い違いを防ぐ。
+  LLVM_VERSION: 22.1.8
+
+jobs:
+  build-and-test:
+    name: ビルド + テスト (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS
+            os: macos-14
+            qt_arch: clang_64
+          - label: Windows
+            os: windows-2022
+            qt_arch: win64_msvc2022_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: MSVC 開発環境を設定
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Ninja を導入
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install ninja
+          else
+            choco install ninja -y --no-progress
+          fi
+        shell: bash
+
+      - name: Qt ${{ env.QT_VERSION }} を導入
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: ${{ matrix.qt_arch }}
+          cache: true
+
+      - name: 導入結果を確認
+        run: |
+          echo "QT_ROOT_DIR=$QT_ROOT_DIR"
+          cmake --version
+          ninja --version
+        shell: bash
+
+      - name: 構成
+        run: cmake --preset dev
+
+      - name: ビルド（警告ゼロ / -Werror・MSVC は /WX）
+        run: cmake --build --preset dev
+
+      - name: テスト（不変条件スキャナ 14 本 + smoke 2 本）
+        run: ctest --preset dev --output-on-failure
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+  lint:
+    name: clang-format + clang-tidy (macOS)
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ninja を導入
+        run: brew install ninja
+
+      - name: Qt ${{ env.QT_VERSION }} を導入
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: clang_64
+          cache: true
+
+      - name: リンタを導入（版を固定）
+        run: |
+          python3 -m pip install --disable-pip-version-check \
+            "clang-format==${LLVM_VERSION}" "clang-tidy==${LLVM_VERSION}"
+          clang-format --version
+          clang-tidy --version
+
+      # clang-tidy は compile_commands.json を必要とするため、構成とビルドを先に行う。
+      - name: 構成とビルド
+        run: |
+          cmake --preset dev
+          cmake --build --preset dev
+
+      - name: clang-format
+        run: clang-format --dry-run --Werror $(git ls-files '*.cpp' '*.hpp')
+
+      - name: clang-tidy
+        run: clang-tidy -p build/dev $(git ls-files 'src/*.cpp')
+
+  sanitizers:
+    name: ASan + UBSan (macOS)
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ninja を導入
+        run: brew install ninja
+
+      - name: Qt ${{ env.QT_VERSION }} を導入
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: clang_64
+          cache: true
+
+      # docs/phases.md §3: ASan + UBSan の対象は macOS / Linux。Windows では動かさない。
+      - name: 構成とビルド
+        run: |
+          cmake --preset asan
+          cmake --build --preset asan
+
+      - name: テスト
+        run: ctest --preset asan --output-on-failure
+        env:
+          QT_QPA_PLATFORM: offscreen
