@@ -1,0 +1,17 @@
+# ビルド成果物
+build/
+out/
+install/
+
+# ローカル固有のプリセット（Qt のパス等）。共有しない
+CMakeUserPresets.json
+
+# 生成される能力表（Phase 1 でビルド時に自動生成）
+docs/format-matrix.md
+
+# エディタ / OS
+.DS_Store
+.vscode/
+.idea/
+*.user
+compile_commands.json
