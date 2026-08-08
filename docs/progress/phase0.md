@@ -387,3 +387,55 @@ squash を採らなかったのは、`agent-protocol.md` §6「1 コミット = 
      公式ドキュメントで確認してから判断する。**今は推測しない**
    - `docs/format-matrix.md` のビルド時自動生成
    - `src/core` 作成後、`invariant.inv3a` / `invariant.inv4` が空振りでなくなることの確認
+
+---
+
+## 2026-08-09 — `.clang-format` に `AccessModifierOffset: -4` を追加（提案が承認された）
+
+### 実施内容
+
+2026-08-09 の「提案」節に記した `.clang-format` への `AccessModifierOffset: -4` 追加が
+**承認されたため実装した。**
+
+`phases.md` §3 が指定する `.clang-format` は 4 項目（LLVM ベース / `IndentWidth: 4` /
+`ColumnLimit: 100` / `PointerAlignment: Left`）のみで、`AccessModifierOffset` の指定は無い。
+LLVM 既定の `-2` が効くため、`IndentWidth: 4` と組み合わさると `public:` が
+2 スペースの位置に来て、本文（4 スペース）ともクラス宣言（0 スペース）とも揃わなかった。
+
+**`phases.md` §3 の指定を上書きしたのではなく、指定の無い項目を追加した。**
+5 項目目である旨と理由を `.clang-format` 内のコメントに残した。
+
+### 変更ファイル
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `.clang-format` | `AccessModifierOffset: -4` と理由コメントを追加 |
+| `src/app/MainWindow.hpp` | 再整形により `public:` が 2 スペース → カラム 0 へ |
+
+**追加 / 削除**: なし
+
+### 追加・変更したテスト
+
+**なし。** 整形設定の変更であり、テストの追加も期待値の変更も無い。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **16 / 16 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev` | exit 0 |
+| 5 | `cmake --build --preset asan` | exit 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **16 / 16 pass** |
+
+### 推測で埋めた箇所
+
+**なし。**
+
+### 残課題 / 次にやること
+
+1. **Windows の実機起動確認。** 変わらず未了。
+2. **Phase 1 の計画提示と承認取得。** 未着手。

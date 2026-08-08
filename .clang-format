@@ -1,5 +1,11 @@
-# docs/phases.md §3 の指定どおり。これ以外の項目は LLVM 既定のままにする。
+# docs/phases.md §3 の指定 4 項目。これ以外は原則 LLVM 既定のままにする。
 BasedOnStyle: LLVM
 IndentWidth: 4
 ColumnLimit: 100
 PointerAlignment: Left
+
+# §3 の指定に無い追加項目（承認を得て追加）。
+# LLVM 既定の AccessModifierOffset は -2 で、IndentWidth: 4 と組み合わせると
+# public: が 2 スペースの位置に来て本文（4 スペース）と揃わない。
+# -4 にするとアクセス指定子がクラス宣言と同じカラムに揃う。
+AccessModifierOffset: -4
