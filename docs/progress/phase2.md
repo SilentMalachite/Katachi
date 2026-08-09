@@ -2132,3 +2132,154 @@ SettingsPanel.cpp: initializing non-owner 'QFormLayout *' with a newly created '
    上書き実行時の確認モーダル。
 2. `.serena/` は未追跡のまま。
 3. Windows の実機起動確認は Phase 0 から未了（CI では通っているが実機未確認）。
+
+---
+
+## 2026-08-09 — T9 完了（`MainWindow` 統合）。**実機での操作確認は未了**
+
+### 実施内容
+
+ウィンドウを組み上げ、D&D から変換の実行・キャンセル・結果表示までを繋いだ。
+TDD の順序を守り、テストを先に書いてから実装した。
+
+**途中で clang-tidy と指示書の衝突が起き、実装を止めて判断を仰いだ**（下記）。
+承認を得て `.clang-tidy` から 1 検査を外し、ADR-0011 に根拠を残した。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `docs/adr/0011-owning-memory-and-qt-parenting.md` | `cppcoreguidelines-owning-memory` を外す判断 |
+| `tests/app/main_window_test.cpp` | 実行時テスト 8 本 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `src/app/MainWindow.hpp/.cpp` | Phase 0 の空ウィンドウから全面的に実装 |
+| `src/app/main.cpp` | 能力表を 1 度だけ作って注入する |
+| `src/app/SettingsPanel.hpp` | レイアウトをメンバに持つ理由のコメントを実態に合わせた |
+| `.clang-tidy` | `cppcoreguidelines-owning-memory` を除外（ADR-0011） |
+| `docs/phases.md` §3 | 上記の除外を追記 |
+| `tests/CMakeLists.txt` | `app/main_window_test.cpp` を追加 |
+
+**削除**: なし
+
+### 設計（ADR-0010 のとおり）
+
+```
++--------------------------------------------------+
+| ジョブ一覧 (QTableView)  <- D&D の受け口           |
++--------------------------------------------------+
+| 設定 (SettingsPanel)                              |
++--------------------------------------------------+
+| 出力先 [____________] [出力先を選ぶ(&B)...]        |
++--------------------------------------------------+
+| [開始(&S)] [キャンセル(&C)]  進捗バー              |
++--------------------------------------------------+
+| ステータス行                                       |
++--------------------------------------------------+
+```
+
+**モーダルは 2 つだけ**（ADR-0010）。出力先の選択（`QFileDialog`）と、
+`Overwrite` で開始するときの確認（`QMessageBox`）。**エラーはステータス行に出す。**
+
+**入力の判定は能力表から。** 落とされたパスの拡張子を `formatIdFromString()` で正規化し、
+`find()` が返す `canDecode` で拾うか捨てるかを決める。**フォーマット名を書かない**（INV3B）。
+
+**実行中は一覧を変えない。** 表と結果の対応が崩れるため、`addSources()` は実行中なら何もしない。
+設定パネルと参照ボタンも実行中は無効化する。
+
+### clang-tidy との衝突（停止して判断を仰いだ）
+
+T8 で「T9 で頻発するようなら ADR 付きで提案する」と申し送ったとおりになった。
+
+```
+MainWindow.cpp:81,82,86,87,93,94: initializing non-owner ... with a newly created 'gsl::owner<>'
+                                  [cppcoreguidelines-owning-memory]
+```
+
+**6 件すべてが `docs/cpp-conventions.md` §1 が明示的に許した書き方**
+（Qt の親付き `new`）である。**ゲートが赤い状態で止め、選択肢を提示して判断を仰いだ。**
+
+**判断（利用者回答）: 除外する。** ADR-0011 に背景・選択肢・決定・帰結を書き、
+`.clang-tidy` と `docs/phases.md` §3 に根拠を残した。
+`bugprone-exception-escape`（Phase 1）に続く 2 つ目の「枠の外の除外」。
+
+**T8 で採った「レイアウトをメンバにする」形はそのまま残した。**
+理由がリンタでなくなったため、コメントを実態に合わせて書き直した。
+
+### 自動テストで確かめられなかったこと（正直に書く）
+
+**合成した `QDropEvent` を `QApplication::sendEvent()` で送っても `dropEvent()` に届かない。**
+Qt のドロップイベントは `QWidgetWindow` がプラットフォームのイベントから作る経路でしか
+配送されず、送っても握り潰される。**実測で確認した**（`acceptDrops()` は true、
+`show()` してからでも届かない）。
+
+当初この配線をテストで固めようとしたが、**通らない道を「通った」ことにはできない。**
+テストを「ウィンドウがドロップを受け付ける設定になっていること」に変え、
+**`dropEvent` → `addSources` の実配線は実機確認に回すと明記した。**
+
+### 追加・変更したテスト（8 本追加。150 → 158）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `dropping files adds one job per file` | URL 3 件で 3 行 | pass |
+| `dropping a folder adds its images recursively` | 2 階層から画像 2 枚。**テキストファイルは入らない**（判定は能力表） | pass |
+| `dropping the same file twice adds it once` | 1 行のまま | pass |
+| `the window accepts drops` | `acceptDrops()` が true | pass |
+| `the table does not auto scroll` | `hasAutoScroll()` が false。100 行追加してもスクロール位置が**変わらない** | pass |
+| `the tab order is set explicitly` | 主要ウィジェットがキーボードで到達でき、**表 → 開始 → キャンセル**の順 | pass |
+| `errors are shown in the status line not a dialog` | 出力先未選択で開始 → **モーダルが開かず**、ステータス行に文言が出て、実行も始まらない | pass |
+| `a finished batch reports its counts in the status line` | 成功 2 / 失敗 1 がステータス行に出る。**失敗行も残る**。モーダル無し | pass |
+
+### 実機での確認（できたこと・できていないこと）
+
+**できたこと: 実機（macOS 14 / arm64、cocoa プラットフォーム）で起動する。**
+`./build/dev/src/app/katachi` を起動し、約 30 秒動作させた。
+**標準出力・標準エラーへの出力は 0 行**（警告もエラーも無し）。
+終了は `pkill` による SIGTERM（exit 143）であり、異常終了ではない。
+
+**できていないこと: GUI の実操作。**
+
+| 確認項目 | 状態 |
+|---|---|
+| ウィンドウが起動する | **確認済み**（上記） |
+| ファイル / フォルダを実際に D&D して行が増える | **未確認** |
+| キーボードのみで開始・キャンセルできる | **未確認** |
+| Windows での実機起動 | **未確認**（Phase 0 から。CI では通っている） |
+
+**エージェントは GUI を実操作できないため、上記 3 点は利用者の確認をお願いする。**
+`docs/phases.md` §4 Phase 0 の「実機確認していない OS は報告に明記する」と同じ扱いで、
+**CI の成功や自動テストの結果を実機操作の根拠として報告しない。**
+
+### 差分規模（停止条件 8。計画時に申告済み）
+
+**9 ファイル / +711 行 / -16 行。** 計画で「T9 は単独で 400 行を超える見込み」と
+申告したとおりになった。内訳は本体 343 行、テスト 259 行、ADR 89 行、残りが設定。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **158 / 158 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev`（対象 13 ファイル） | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **158 / 158 pass** |
+
+### 推測で埋めた箇所
+
+**なし。** 合成ドロップイベントが届かないことは実測で確認し、
+clang-tidy との衝突は自分で判断せず停止して指示を仰いだ。
+
+### 残課題 / 次にやること
+
+1. **T10（受け入れ基準の検証）に着手する。** 1000 ファイルのバッチ、UI 応答性、
+   §7 の機械検査（`grep` 3 件）、`MemoryBudget` のピーク確認、CI。
+2. **利用者にお願いする実機確認**（上記）。D&D とキーボード操作。
+3. `.serena/` は未追跡のまま。
+4. Windows の実機起動確認は Phase 0 から未了。

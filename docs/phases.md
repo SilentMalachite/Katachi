@@ -112,7 +112,15 @@ cmake --preset asan && ctest --preset asan   # ASan + UBSan（macOS / Linux）
 **追加の除外（Phase 1 で承認）**: `bugprone-exception-escape`。
 **ADR-0002 と原理的に両立しないため。** ADR-0002 は「コア関数は `noexcept` を維持し、
 確保失敗時の `std::terminate` を意図的に受け入れる」と決めており、この検査は
-まさにその形を禁止する。**これ以上の除外を増やすときも、同じように根拠を ADR に書き、
+まさにその形を禁止する。
+
+**追加の除外（Phase 2 で承認）**: `cppcoreguidelines-owning-memory`。
+**`cpp-conventions.md` §1 と原理的に両立しないため。** §1 は「Qt の親付き `new` は
+`app/` 層のみ許可」と明示しているが、この検査は `new` の結果を非所有ポインタへ
+入れること自体を咎める。局所変数でも引数でも指摘され、回避するとクラス構造が歪む
+（**ADR-0011** に実測を記録）。
+
+**これ以上の除外を増やすときも、同じように根拠を ADR に書き、
 ここへ追記すること。黙って増やさない。**
 
 **不変条件スキャナ 7 種（`tests/` に置く。1〜6 は Phase 0、7 は Phase 2 で実装する）**

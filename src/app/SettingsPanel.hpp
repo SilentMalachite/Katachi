@@ -84,10 +84,10 @@ private:
     QSpinBox* resizeHeight_;
     QCheckBox* resizeEnabled_;
 
-    // レイアウトをメンバに持つのは clang-tidy の cppcoreguidelines-owning-memory による。
-    // 局所変数や引数として new を渡すと「非所有ポインタに所有権を入れている」と指摘される
-    // （メンバ初期化子では指摘されない）。docs/cpp-conventions.md §1 は app 層での
-    // Qt の親付き new を明示的に許しており、寿命は親ウィジェットが持つ。
+    // 他のウィジェットと同じくメンバ初期化子で作る。寿命は親ウィジェットが持つ
+    // （docs/cpp-conventions.md §1 が app 層で許した Qt の親子オーナーシップ）。
+    // **元は clang-tidy を通すための形だったが、その検査は ADR-0011 で外した。**
+    // レイアウトだけ局所にする理由が無いため、この形のまま残している。
     QFormLayout* form_;
 };
 
