@@ -78,6 +78,17 @@ jobs:
       - name: ビルド（警告ゼロ / -Werror・MSVC は /WX）
         run: cmake --build --preset dev
 
+      # docs/format-matrix.md はビルド時に生成され、内容は実行環境の Qt プラグイン構成で
+      # 決まる（cmake/FormatMatrix.cmake）。OS ごとに何が使えるのかを推測で書かないため、
+      # 両 OS の生成物をここで取り出す（Phase 3 T1）。
+      # ビルド直後に置くのは、テストが落ちても対応表は入手したいため。
+      - name: 対応フォーマット一覧を取り出す
+        uses: actions/upload-artifact@v4
+        with:
+          name: format-matrix-${{ matrix.label }}
+          path: docs/format-matrix.md
+          if-no-files-found: error
+
       # 件数を名前に書かない。テストが増えるたびに古くなるため
       # （Phase 0 の「14 本 + smoke 2 本」が Phase 2 の時点で 142 本になっていた）。
       - name: テスト（ctest）
