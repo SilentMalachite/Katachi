@@ -16,14 +16,18 @@
 
 namespace katachi::io {
 
+// 仮引数名が docs/cpp-conventions.md §2.2 の t ではないのは、clang-tidy の
+// readability-identifier-length（3 文字未満を禁止）による。
+// src/core/Concepts.hpp が同じ理由で source / format としているのに合わせた。
+// **要求する操作は §2.2 のまま。契約は変えていない。**
 template <typename T>
-concept ByteSource = requires(T& t) {
-    { t.read() } -> std::same_as<core::Result<QByteArray, IoError>>;
+concept ByteSource = requires(T& source) {
+    { source.read() } -> std::same_as<core::Result<QByteArray, IoError>>;
 };
 
 template <typename T>
-concept ByteSink = requires(T& t, const QByteArray& bytes) {
-    { t.write(bytes) } -> std::same_as<core::Result<std::monostate, IoError>>;
+concept ByteSink = requires(T& sink, const QByteArray& bytes) {
+    { sink.write(bytes) } -> std::same_as<core::Result<std::monostate, IoError>>;
 };
 
 // 進捗とキャンセル。Qt に依存せず JobRunner をテストするための抽象。
@@ -34,9 +38,9 @@ concept ByteSink = requires(T& t, const QByteArray& bytes) {
 // 要求すると本番型が concept を満たせなくなる。
 // isCancelled() は単なるフラグ読み出しなので noexcept を課す。
 template <typename T>
-concept ProgressSink = requires(T& t, int done, int total) {
-    { t.onProgress(done, total) };
-    { t.isCancelled() } noexcept -> std::same_as<bool>;
+concept ProgressSink = requires(T& sink, int done, int total) {
+    { sink.onProgress(done, total) };
+    { sink.isCancelled() } noexcept -> std::same_as<bool>;
 };
 
 } // namespace katachi::io

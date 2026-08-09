@@ -37,7 +37,8 @@ add_executable(katachi_tests main.cpp core/qt_image_plugins_smoke.cpp core/resul
                             core/converter_test.cpp
                             core/naming_rule_test.cpp
                             core/format_matrix_test.cpp
-                            io/io_concepts_test.cpp)
+                            io/io_concepts_test.cpp
+                            io/file_io_test.cpp)
 
 add_dependencies(katachi_tests katachi_fixtures)
 

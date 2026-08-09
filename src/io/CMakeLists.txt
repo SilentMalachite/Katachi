@@ -6,11 +6,19 @@
 # 両方が揃って初めて「ワーカーから QWidget に触れていない」が塞がる
 # （docs/phases.md §4 Phase 2 の受け入れ基準）。Phase 1 の katachi_core と同じ手口。
 #
-# T1 時点では IoError.hpp / IoConcepts.hpp のヘッダのみのため INTERFACE。
-# STATIC にするとソースが無くて CMake が失敗する。
-# **FileSource.cpp / FileSink.cpp が入る T2 で STATIC へ変更する。**
-add_library(katachi_io INTERFACE)
+# T2 で FileSource.cpp / FileSink.cpp が入ったため INTERFACE から STATIC へ変更した。
+add_library(
+    katachi_io STATIC
+    FileSink.cpp
+    FileSink.hpp
+    FileSource.cpp
+    FileSource.hpp
+    IoConcepts.hpp
+    IoError.hpp)
 
-target_include_directories(katachi_io INTERFACE "${PROJECT_SOURCE_DIR}/src")
+target_include_directories(katachi_io PUBLIC "${PROJECT_SOURCE_DIR}/src")
 
-target_link_libraries(katachi_io INTERFACE katachi_core)
+target_link_libraries(
+    katachi_io
+    PUBLIC Qt6::Core katachi_core
+    PRIVATE katachi_warnings katachi_sanitizers)

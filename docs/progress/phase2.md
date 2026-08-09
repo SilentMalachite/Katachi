@@ -848,3 +848,140 @@ CI の Qt 6.8.3 が `_q_icoOrigDepth` を注入しない場合、このテスト
 2. `indexed.png` を `fixtures_test.cpp` の大きさ検査へ足すかどうかの判断（上記）。
 3. `.serena/` は未追跡のまま。
 4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
+
+---
+
+## 2026-08-09 — T2 完了（`FileSource` / `FileSink`）
+
+### 実施内容
+
+io 層の入出力を実装した。`FileSink` は `QSaveFile` を使い、
+**失敗しても部分的に書かれたファイルを残さない。**
+TDD の順序を守り、実装前に意図した理由での失敗
+（`'io/FileSink.hpp' file not found`）を確認した。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/io/FileSource.hpp/.cpp` | `QFile` 読み出し。上限バイト数を持つ（ADR-0008）。`static_assert(ByteSource<FileSource>)` |
+| `src/io/FileSink.hpp/.cpp` | `QSaveFile` による原子的な書き出し。`static_assert(ByteSink<FileSink>)` |
+| `tests/io/file_io_test.cpp` | 実行時テスト 7 本 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `src/io/CMakeLists.txt` | **`INTERFACE` → `STATIC`**（`.cpp` が入ったため）。`Qt6::Core` を明示リンク |
+| `src/io/IoConcepts.hpp` | 仮引数名を `t` → `source` / `sink` へ（下記の clang-tidy 指摘） |
+| `tests/CMakeLists.txt` | `io/file_io_test.cpp` を追加 |
+
+**削除**: なし
+
+### 設計上の判断
+
+**`FileSource::read()` は上限判定を読み込みより前に行う**（ADR-0008）。
+`QFileInfo::size()` で測ってから `open()` する。読んでから測っても手遅れになる。
+上限の既定は予算総量と同じ 1 GiB とした。
+
+**`readAll()` の後に `QFile::error()` を確認する。**
+開けたが読み切れなかった場合に、黙って短いバイト列を返さない。
+途中で切れた入力をそのまま変換すると「壊れた画像」ではなく**「壊れた出力」**になって外へ出る。
+専用の列挙値（`ReadFailed` 等）を作らず `OpenFailed` に寄せたのは、
+**移植可能な形で発生させる手段が無く、`docs/phases.md` §2.2 の
+「全列挙値にテストがある」を満たせないため。** この分岐にはテストが無い。理由をコードにも書いた。
+
+**`FileSink::write()` は `const` メンバにした。** メンバを書き換えないため。
+**T3 で衝突ポリシーを入れると解決後のパスを保持する必要が生じ、`const` を外す。**
+先回りして非 `const` にしておくことはしなかった（`readability-make-member-function-const` が
+現時点の実装を正しく指摘するため。将来のために嘘の署名を置かない）。
+
+**ディレクトリを自動で作らない。** 親ディレクトリが無ければ `WriteFailed` を返す。
+利用者が指していない場所へ書かない。
+
+### clang-tidy がついに io へ届いた（T1 で予告した確認）
+
+`FileSource.cpp` / `FileSink.cpp` が入ったことで、ゲートの対象が 5 本 → **7 本**になり、
+`HeaderFilterRegex` 経由で `src/io` のヘッダにも届くようになった。予告どおり新たな指摘が出た。
+
+```
+IoConcepts.hpp:20:34: error: parameter name 't' is too short,
+                             expected at least 3 characters [readability-identifier-length]
+（同 25 行目・37 行目）
+```
+
+`docs/cpp-conventions.md` §2.2 の定義をそのまま写した結果、requires 式の仮引数が `t` だった。
+
+**対処: `source` / `sink` へ改名した。** `src/core/Concepts.hpp` が同じ理由で
+`source` / `format` としており、既存コードの慣習に合わせた形になる
+（`agent-protocol.md` §1 の解決順序 3）。
+**要求する操作は §2.2 のまま。契約は 1 つも変えていない。** 抑制もしていない。
+
+### 追加・変更したテスト（7 本追加。100 → 107）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `FileSource reads back the bytes that were written` | 読み出した `QByteArray` が元の内容と**バイト一致**（NUL を含む 17 バイト） | pass |
+| `FileSource reports NotFound for a missing path` | `IoError::NotFound` | pass |
+| `FileSource reports OpenFailed for a directory` | `IoError::OpenFailed` | pass |
+| `FileSource reports TooLarge above the limit` | 上限 8 バイトのとき、**8 バイトは通り**、9 バイトで `IoError::TooLarge` | pass |
+| `FileSink writes the exact bytes` | 書き出したファイルの内容が**バイト一致** | pass |
+| `FileSink reports WriteFailed for a missing directory` | 存在しない親ディレクトリで `IoError::WriteFailed` | pass |
+| `FileSink leaves no partial file when it fails` | 失敗後にそのパスが存在せず、**出力先ディレクトリの一覧が失敗前と一致**（一時ファイルもディレクトリも残さない） | pass |
+
+上限のテストは**境界の両側**を見ている。「ちょうど上限は通る」を固定しないと、
+`>` と `>=` の取り違えが検出できない。
+
+`IoError` は `DestinationExists` を除く 4 値にテストが揃った。
+**`DestinationExists` は T3（衝突ポリシー）で発生させる。**
+
+### 本番型の concept 適合（T1 で約束した宿題のうち 2 件）
+
+| 契約 | 置き場所 |
+|---|---|
+| `static_assert(ByteSource<FileSource>)` | `FileSource.cpp` |
+| `static_assert(ByteSink<FileSink>)` | `FileSink.cpp` |
+
+ヘッダではなく `.cpp` に置いたのは、`IoConcepts.hpp` を利用者へ押し付けないため。
+`src/core/CapabilityTable.cpp` と同じ置き方。
+**残るは `ProgressSink<JobRunnerBridge>`（T6）。**
+
+### リンク構成の実測（io が STATIC になった後）
+
+```
+1 libkatachi_core.a
+1 libkatachi_io.a
+1 QtCore.framework
+1 QtGui.framework
+```
+
+**`QtWidgets.framework` は無い。** 各アーカイブも 1 回ずつで、
+T1 で解消した重複リンクが `Qt6::Core` の明示リンク追加によって再発していないことも確認できた。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **107 / 107 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev`（**対象 7 ファイル**） | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **107 / 107 pass** |
+
+### 推測で埋めた箇所
+
+**なし。** `QSaveFile` の「commit するまで目的のパスに現れない」挙動は、
+`FileSink leaves no partial file when it fails` で実際に確認している。
+
+### 残課題 / 次にやること
+
+1. **T3（衝突ポリシー）に着手する。** `CollisionPolicy`（`Overwrite` / `Skip` / `Rename`、**既定 `Skip`**）を
+   `src/io` に置き、`FileSink` へ適用する（ADR-0009）。
+   ここで `FileSink` の構築引数が「ディレクトリ + 希望する名前 + ポリシー」に変わり、
+   `write()` の `const` が外れる。`IoError::DestinationExists` のテストもここで入る。
+2. `indexed.png` を `fixtures_test.cpp` の大きさ検査へ足すかどうかの判断（T1.5 で報告）。
+3. `.serena/` は未追跡のまま。
+4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
