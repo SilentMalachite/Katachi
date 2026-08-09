@@ -42,6 +42,8 @@ struct BatchRequest {
     QStringList sourcePaths;
     OutputDirectory outputDirectory;
     core::NamePattern pattern;
+    // 空なら出力形式の代表名を使う（JobItem::extension と同じ扱い）。
+    core::NameExtension extension;
     core::ConversionSpec spec;
     CollisionPolicy collision = defaultCollisionPolicy;
 };

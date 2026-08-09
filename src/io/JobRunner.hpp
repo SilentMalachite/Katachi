@@ -52,6 +52,10 @@ struct JobItem {
     QString sourceBaseName; // 命名規則の {name}
     int index = 0;          // 命名規則の {index}
     core::NamePattern pattern;
+    // 命名規則の {ext}。**空なら出力形式の代表名を使う。**
+    // 別名を持つ形式（jpeg なら jpg / jfif）でどれを使うかは利用者が選ぶ。
+    // 選ばせる根拠が指示書に無いため既定は代表名のままにし、選択肢だけを用意する。
+    core::NameExtension extension;
     core::ConversionSpec spec;
 };
 
@@ -74,16 +78,17 @@ struct BatchCounter {
 
 // 出力ファイル名を作る。純粋（ファイルシステムを見ない）。
 //
-// 拡張子は出力形式そのもの（FormatId）から作る。**文字列リテラルを書かない。**
-// 別名のうちどれを使うかを選ぶ根拠が無いため、代表名をそのまま使う
-// （jpeg なら photo.jpeg になる。ADR-0006 の代表名）。
+// 拡張子は JobItem::extension。**空なら出力形式の代表名から作る**（ADR-0006）。
+// どちらの経路でも**文字列リテラルは書かない。**形式名は能力表と FormatId から来る。
 //
 // 衝突の解決はしない（ADR-0005）。それは FileSink と Bridge の仕事。
 [[nodiscard]] inline core::Result<OutputFileName, core::NamingError>
 outputFileNameFor(const JobItem& item) {
     using NameResult = core::Result<OutputFileName, core::NamingError>;
 
-    const core::NameExtension extension{core::formatIdToString(item.spec.target)};
+    const core::NameExtension extension =
+        item.extension.v.isEmpty() ? core::NameExtension{core::formatIdToString(item.spec.target)}
+                                   : item.extension;
     const core::Result<QString, core::NamingError> name =
         core::resolveOutputName(item.sourceBaseName, item.index, item.pattern, extension);
 

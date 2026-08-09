@@ -37,6 +37,7 @@ using katachi::core::ConversionSpec;
 using katachi::core::ConvertError;
 using katachi::core::ConvertWarning;
 using katachi::core::formatIdFromString;
+using katachi::core::NameExtension;
 using katachi::core::NamePattern;
 using katachi::core::NamingError;
 using katachi::io::BatchCounter;
@@ -217,6 +218,23 @@ TEST_CASE("outputFileNameFor builds the name from the pattern and the target for
 
     REQUIRE(name.isOk());
     REQUIRE(name.value().v == QStringLiteral("photo_001.png"));
+}
+
+TEST_CASE("outputFileNameFor uses the chosen extension", "[io][jobrunner]") {
+    // 利用者が別名を選べる（T8 で SettingsPanel から渡す）。
+    // 指定が無ければ代表名（ADR-0006）へ落ちる。
+    JobItem item = itemFor(QStringLiteral("jpeg"));
+    item.pattern = NamePattern{QStringLiteral("{name}.{ext}")};
+
+    const auto fallback = outputFileNameFor(item);
+    REQUIRE(fallback.isOk());
+    REQUIRE(fallback.value().v == QStringLiteral("photo.jpeg"));
+
+    item.extension = NameExtension{QStringLiteral("jpg")};
+
+    const auto chosen = outputFileNameFor(item);
+    REQUIRE(chosen.isOk());
+    REQUIRE(chosen.value().v == QStringLiteral("photo.jpg"));
 }
 
 TEST_CASE("outputFileNameFor reports a naming failure with its reason", "[io][jobrunner]") {

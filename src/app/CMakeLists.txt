@@ -4,7 +4,14 @@ set(CMAKE_AUTOMOC ON)
 
 # app 層をライブラリに分け、実行ファイルは薄い main.cpp のみとする。
 # Phase 2 で app 層をテストから駆動できるようにするための分割。
-add_library(katachi_app STATIC JobTableModel.cpp JobTableModel.hpp MainWindow.hpp MainWindow.cpp)
+add_library(
+    katachi_app STATIC
+    JobTableModel.cpp
+    JobTableModel.hpp
+    SettingsPanel.cpp
+    SettingsPanel.hpp
+    MainWindow.hpp
+    MainWindow.cpp)
 
 target_include_directories(katachi_app PUBLIC "${PROJECT_SOURCE_DIR}/src")
 

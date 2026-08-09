@@ -116,6 +116,7 @@ void JobRunnerBridge::start(const BatchRequest& request) {
         item.sourceBaseName = QFileInfo(path).completeBaseName();
         item.index = index;
         item.pattern = request.pattern;
+        item.extension = request.extension;
         item.spec = request.spec;
         items.append(std::move(item));
     }

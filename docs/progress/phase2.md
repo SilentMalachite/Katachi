@@ -2001,3 +2001,134 @@ Phase 1 の最終エントリから「`phase1` ブランチの削除。未実施
 2. `.serena/` は未追跡のまま。
 3. **Windows の実機起動確認は Phase 0 から未了**（CI では通っているが実機未確認）。
    `phase1` ブランチの件は本エントリで決着したため、以後の残課題から外す。
+
+---
+
+## 2026-08-09 — T8 完了（`SettingsPanel`）。拡張子を選べるようにした
+
+### 実施内容
+
+変換設定の入力欄を実装した。**T4 で報告した「出力の拡張子が `.jpeg` になる」件について
+「`.jpg` を選べるようにする」との判断を得たため、拡張子の選択を設計に入れた。**
+TDD の順序を守り、テストを先に書いてから実装した。
+
+### 得られた判断（利用者回答）
+
+| 事項 | 判断 |
+|---|---|
+| 出力の拡張子が代表名（`jpeg`）になる | **利用者が選べるようにする。** 選択肢は能力表の `extensions`（別名の和集合）から作る |
+
+**既定は代表名のままにした。** 別名のどれを既定にすべきかの根拠は依然として無く、
+既定を変えると従来の出力名が黙って変わる。**選択肢を用意し、選ぶのは利用者に委ねる。**
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/app/SettingsPanel.hpp/.cpp` | `QFormLayout` の設定欄。選択肢はすべて能力表から作る |
+| `tests/app/settings_panel_test.cpp` | 実行時テスト 7 本 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `src/io/JobRunner.hpp` | `JobItem::extension` を追加。`outputFileNameFor()` が使う（空なら代表名） |
+| `src/io/JobRunnerBridge.hpp/.cpp` | `BatchRequest::extension` を追加し、各 `JobItem` へ配る |
+| `tests/io/job_runner_test.cpp` | 拡張子のテスト 1 本を追加 |
+| `src/app/CMakeLists.txt` / `tests/CMakeLists.txt` | 新規ファイルの登録 |
+
+**削除**: なし
+
+### 承認された計画からの変更（申告）
+
+**T8 の範囲を超えて io 層に触れた。** `JobItem` と `BatchRequest` に `extension` を足し、
+`outputFileNameFor()` の実装を変えた。**拡張子を選べるようにするには、
+選んだ値が命名まで届く経路が要る。** T8 の中で完結させると、
+`SettingsPanel` が値を持つだけで誰にも渡らない。
+
+**既定の振る舞いは変えていない。** `extension` が空なら従来どおり代表名を使う。
+T4 で入れたテストはそのまま通っている。
+
+### 設計上の判断
+
+**選択肢はすべて能力表から作る。** 出力形式は `encodable()`、拡張子は
+選択中の形式の `extensions`。**`SettingsPanel` にフォーマット名の文字列リテラルは 1 つも無い**
+（INV3B が検査する）。テスト側も形式名を直接書かず、能力表から条件で選んでいる
+（環境で対応形式が変わってもテストの意味が保たれる）。
+
+**品質欄は `supportsQuality` に追随して無効化する。** 扱えない形式で値だけ残しても意味が無い。
+
+**合成色（`flattenColor`）の欄は作らなかった。** 色の選択には `QColorDialog` が要り、
+ADR-0010 が認めたモーダルの 2 用途（出力先の選択 / 上書きの確認）に当たらない。
+**既定の白のままにした。** 必要になればモーダルの許容範囲を ADR で広げてから作る。
+
+**ウィジェットを外へ晒さない。** 値は意味のある単位（`spec()` / `namePattern()` /
+`extension()` / `collisionPolicy()`）で返す。テストも T9 の `MainWindow` もこの API 越しに扱う。
+
+**タブ順をこの層で明示した**（`docs/spec-core.md` §7）。ウィンドウ全体の連結は T9 で行う。
+
+### clang-tidy との衝突 1 件と対処
+
+```
+SettingsPanel.cpp: initializing non-owner 'QFormLayout *' with a newly created 'gsl::owner<>'
+                   [cppcoreguidelines-owning-memory]
+```
+
+`cppcoreguidelines-owning-memory` は **Qt の親子オーナーシップと正面から衝突する。**
+`docs/cpp-conventions.md` §1 は「Qt の親付き `new` は `app/` 層のみ許可」と
+**明示的に許している**が、この検査は局所変数・引数への `new` をすべて咎める。
+
+試した順序。
+
+1. `auto* layout = new QFormLayout(this);` → **指摘される**（局所変数）
+2. `setLayout(new QFormLayout);` → **指摘される**（引数）
+3. **メンバ初期化子で持つ** → **指摘されない**
+
+**3 を採った。** 他のウィジェットもすべてメンバ初期化子で作っており、
+レイアウトだけ別扱いにする理由が無い。**検査を外していない。**
+理由はヘッダにコメントとして残した。
+
+**T9 で局所のレイアウトが増えて同じ衝突が頻発するようなら、
+`.clang-tidy` から外すことを ADR 付きで提案する。黙って外さない。**
+
+### 追加・変更したテスト（8 本追加。142 → 150）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `the format list comes from the capability table` | 項目数が `encodable().size()` と一致。**全項目が能力表で書き出し可能** | pass |
+| `the quality control follows supportsQuality` | 品質を扱える形式では有効、扱えない形式では**無効** | pass |
+| `the extension list comes from the selected format` | 一覧が `extensions` と一致し**複数ある**。既定は**代表名**。**別名を選べる** | pass |
+| `changing the format repopulates the extensions` | 形式を変えると前の拡張子が**残らない**。既定は新しい形式の代表名 | pass |
+| `the panel produces the spec it displays` | 画面の値と `spec()` が一致（形式 / 品質 / リサイズ / アルファ / メタデータ / ICC）。**リサイズは外せる** | pass |
+| `the default collision policy shown is Skip` | 初期表示が `Skip`。**`Overwrite` でない** | pass |
+| `the default naming pattern keeps the source name` | 既定が `{name}.{ext}` | pass |
+| `outputFileNameFor uses the chosen extension`（io 側） | 指定が無ければ `photo.jpeg`、`jpg` を指定すると **`photo.jpg`** | pass |
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **150 / 150 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev`（対象 12 ファイル） | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **150 / 150 pass** |
+
+`invariant.inv3b`（app にフォーマット名の文字列リテラルが無い）も green。
+**選択肢を能力表から作る方針が機械検査で守られている。**
+
+### 推測で埋めた箇所
+
+**なし。** 拡張子の既定を代表名のままにしたのは、別名を選ぶ根拠が指示書に無いため。
+**勝手に `.jpg` を既定にしていない。**
+
+### 残課題 / 次にやること
+
+1. **T9（`MainWindow` 統合）に着手する。** D&D、開始 / キャンセル、進捗バー、
+   ステータス行、ウィンドウ全体のタブ順、`QFileDialog` による出力先選択、
+   上書き実行時の確認モーダル。
+2. `.serena/` は未追跡のまま。
+3. Windows の実機起動確認は Phase 0 から未了（CI では通っているが実機未確認）。
