@@ -66,9 +66,12 @@ MainWindow::MainWindow(const core::CapabilityTable& caps, QWidget* parent)
     browse_->setText(tr("出力先を選ぶ(&B)..."));
     start_->setText(tr("開始(&S)"));
     cancel_->setText(tr("キャンセル(&C)"));
-    start_->setObjectName(QStringLiteral("startButton"));
-    cancel_->setObjectName(QStringLiteral("cancelButton"));
-    browse_->setObjectName(QStringLiteral("browseButton"));
+    // QStringLiteral は使わない。マクロの定義ヘッダが Qt 6.8 と 6.11 で異なり、
+    // clang-tidy の misc-include-cleaner が 6.8 でだけ「提供ヘッダが未 include」と判定する。
+    // src/app/main.cpp と同じ形に揃える（Phase 0 の知見。docs/progress/phase0.md）。
+    start_->setObjectName(QString::fromUtf8("startButton"));
+    cancel_->setObjectName(QString::fromUtf8("cancelButton"));
+    browse_->setObjectName(QString::fromUtf8("browseButton"));
 
     outputDirectory_->setPlaceholderText(tr("出力先フォルダ"));
     progress_->setRange(0, 1);
