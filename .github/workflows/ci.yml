@@ -59,6 +59,10 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           arch: ${{ matrix.qt_arch }}
+          # TIFF / WebP / JP2 / ICNS / TGA などのプラグインは qtbase ではなく
+          # qtimageformats アドオンに入っている。既定ではインストールされないため明示する。
+          # 入れないと能力表から該当形式が丸ごと消え、フィクスチャ生成が失敗する。
+          modules: qtimageformats
           cache: true
 
       - name: 導入結果を確認
@@ -94,6 +98,8 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           arch: clang_64
+          # 上と同じ理由。qtimageformats を明示する。
+          modules: qtimageformats
           cache: true
 
       - name: リンタを導入（版を固定）
@@ -130,6 +136,8 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           arch: clang_64
+          # 上と同じ理由。qtimageformats を明示する。
+          modules: qtimageformats
           cache: true
 
       # docs/phases.md §3: ASan + UBSan の対象は macOS / Linux。Windows では動かさない。
