@@ -126,3 +126,71 @@ HEIF が落ちているはずだが、**これは推測であり、T1 で CI の
 1. T1: CI で両 OS の `format-matrix.md` を artifact 化し、OS 別対応表をここに貼る
 2. T2: ライセンス調査（T1 の結果を見てから対象を最終確定する）
 3. `.serena/` は未追跡のまま（Phase 2 から継続）
+
+---
+
+## 2026-08-09 — T1 完了。OS 別の対応形式を CI の実測で確定した
+
+### 実施内容
+
+`.github/workflows/ci.yml` の `build-and-test` ジョブに、ビルド直後の
+`docs/format-matrix.md` を artifact として上げる手順を足した。
+run 31314295650（commit `a3e1e5e`）で 4 ジョブとも success、両 OS の生成物を入手した。
+
+### 実測結果（**Qt 6.8.3 / `modules: qtimageformats` 込み。両 OS とも同一 Qt 版**）
+
+| 形式 | macOS | Windows |
+|---|---|---|
+| bmp / cur / gif / icns / ico / jpeg / pbm / pgm / png / ppm / svg / svgz / tga / tiff / wbmp / webp / xbm / xpm（**18 形式**） | 記載どおり | **完全に同一**（拡張子・読み・書き・アルファ・品質・可逆の 6 列すべて一致） |
+| **heic** | 読 o / 書 o / 品質 o | **無し** |
+| **heif** | 読 o / 書 o / 品質 o | **無し** |
+| **jp2** | 読 o / 書 o / 品質 o / 可逆 o | **無し** |
+
+**macOS のみ 21 形式、Windows は 18 形式。差は `heic` / `heif` / `jp2` の 3 つだけ。**
+
+### 着手記録の推測に対する答え合わせ
+
+T0 で「Windows では HEIF が落ちているはずだが**推測である**」と書いた。
+**実測の結果、推測は当たっていた。** さらに `jp2` も Windows に無いことが分かった。
+これは T0 で予想していなかった。macOS の `libqmacjp2` は Apple の Image I/O を使う
+macOS 固有プラグインであり、Windows 側には対応するものが無いためと考えられる
+（**この因果の説明自体は未検証。事実は「Windows に jp2 が無い」ことのみ**）。
+
+### この結果が Phase 3 に与える意味
+
+- **AVIF / JPEG XL / PSD / RAW はどちらの OS にも無い。** D2 の対象選定は妥当だった
+- **HEIF を自前導入しない（D2）と、Windows では HEIF が使えないままになる。**
+  macOS だけが読み書きできる状態が残る。これは「対応フォーマットが OS で異なる」
+  という利用者から見える差であり、Phase 4 の配布時に説明が要る
+- `jp2` も同じ形の OS 差である。**どちらも今回の対象外だが、記録しておく**
+
+### 変更ファイル
+
+- 変更: `.github/workflows/ci.yml`（artifact 取得の手順を 8 行追加）
+- 変更: `docs/progress/phase3.md`（本エントリ）
+
+### 追加・変更したテスト
+
+**なし。** 生成物の検証は既存の `tests/core/format_matrix_test.cpp` が担っている。
+
+### 品質ゲートの実行結果
+
+| # | 実行 | 結果 |
+|---|---|---|
+| 1 | ローカル `cmake --build --preset dev` | exit 0 / 警告 0（`ninja: no work to do.`） |
+| 2 | ローカル `ctest --preset dev` | **166 / 166 pass** |
+| 3 | CI run 31314295650（4 ジョブ） | **すべて success** |
+
+CI の 4 ジョブが 6 ゲート全数を担っている。
+
+### 推測で埋めた箇所
+
+**Windows に `jp2` が無い理由**を「`libqmacjp2` が macOS 固有だから」と書いたが、
+これは一般的な Qt の慣習からの推論であり（`docs/agent-protocol.md` §1 の 5）、
+**Windows 側のプラグイン一覧を実測してはいない。** 事実として確定しているのは
+「Windows の能力表に `jp2` が無い」ことだけである。
+
+### 残課題 / 次にやること
+
+1. T2: ライセンス調査の結果を記録する
+2. Phase 4 で「対応形式が OS によって異なる」ことを利用者向けに説明する必要がある
