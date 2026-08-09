@@ -21,14 +21,17 @@ katachi/
 │   │   ├── Converter.hpp/.cpp      # 純粋関数（非テンプレート）
 │   │   └── NamingRule.hpp/.cpp     # 純粋関数
 │   ├── io/            # 副作用の境界。core に依存してよいが逆は不可
+│   │   │                # Qt6::Widgets はリンクしない（ワーカー側の層のため）
 │   │   ├── IoError.hpp             # core には置かない
 │   │   ├── IoConcepts.hpp          # ByteSource / ByteSink / ProgressSink
 │   │   ├── FileSource.hpp/.cpp / FileSink.hpp/.cpp
+│   │   ├── CollisionPolicy.hpp/.cpp  # Overwrite / Skip / Rename。既定 Skip（ADR-0009）
+│   │   ├── MemoryBudget.hpp/.cpp     # バッチ実行時のメモリ上限（ADR-0008）
 │   │   ├── JobRunner.hpp           # テンプレート。ヘッダのみ（.cpp を作らない）
 │   │   └── JobRunnerBridge.hpp/.cpp  # 非テンプレートの QObject アダプタ
 │   └── app/           # 依存: Qt6::Widgets
 │       ├── MainWindow / JobTableModel / SettingsPanel / main.cpp
-├── tests/{core,io,fixtures}/
+├── tests/{core,io,app,fixtures}/    # app のみ QApplication が要るため実行ファイルを分ける
 ├── tools/format_matrix.cpp          # docs/format-matrix.md の生成器（ビルド時に実行）
 ├── CLAUDE.md                       # リポジトリ直下（常時読み込み）
 ├── docs/                           # 参照文書は全てここ
@@ -233,6 +236,17 @@ resolveOutputName(const QString& sourceBaseName, int index,
 > core ではファイルアクセスが禁止されているため実装できない。
 > `resolveOutputName()` は**名前の生成のみ**を担い、衝突の解決は
 > **Phase 2 の `src/io` 層**で行う。
+
+**適用する場所と、スキップの表し方（ADR-0009）。**
+
+- `CollisionPolicy` の列挙は `src/io/CollisionPolicy.hpp` に置く。**core には置かない**
+- 適用するのは `FileSink::write()`、すなわち**ワーカースレッドで、そのファイルを書く直前**。
+  main thread が事前に全件の実在確認をしない（1000 件で UI が止まるため）
+- `Skip` で書かなかったことは `IoError::DestinationExists` として返す。
+  `ByteSink` の戻り値型（`cpp-conventions.md` §2.2）を変えないため。
+  **app 層は「スキップ（既存）」と表示し、失敗件数に数えない**
+- `Rename` は `_1` から順に試し、上限 10000 で打ち切って `IoError::WriteFailed` を返す
+- `Overwrite` を選んだ状態での実行開始時のみ、確認のモーダルを出す（§7 が認める唯一の例外）
 
 ---
 
