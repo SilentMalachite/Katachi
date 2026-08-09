@@ -514,3 +514,91 @@ QT_PLUGIN_PATH=<build>/tests/test-plugins:<build>/plugins
    （T3 の「推測で埋めた箇所」2。ローカルは Qt 6.11.1 でしか確認していない）
 2. T7: ADR-0003 の宿題（EXIF 全体保持）に決着をつける
 3. T8: 受け入れ基準の検証と PR
+
+---
+
+## 2026-08-09 — T5 / T6 完了。**Qt 6.8.3 でも通った**。T7 も完了
+
+### 実施内容
+
+CI に「追加コーデック ON (macOS)」ジョブを足し、実コーデック 4 つを実際にビルドして
+テストまで通した。併せて ADR-0003 の宿題に ADR-0014 で決着をつけた。
+
+### T3 で「未確認」と書いた点が解消した
+
+T3 の「推測で埋めた箇所」2 に、**kimageformats v6.20.0 が Qt 6.8.3 でビルドできるかは
+未確認**（ローカルは 6.11.1）と書いた。
+
+**CI run 31318145842（commit `f423af7`）で確認できた。5 ジョブすべて success。**
+
+| ジョブ | 結果 |
+|---|---|
+| ビルド + テスト (macOS) | success |
+| ビルド + テスト (Windows) | success |
+| clang-format + clang-tidy (macOS) | success |
+| **追加コーデック ON (macOS)** | **success** |
+| ASan + UBSan (macOS) | success |
+
+**Qt 6.8.3 でも 57 形式になり、ローカルの Qt 6.11.1 と完全に一致した。**
+増えた 36 形式の顔ぶれも同じである（`avif` `avifs` `jxl` `psd` `psb` `pdd` `psdt` と RAW の 29 拡張子）。
+
+これで ADR-0013 の「Qt 6.8 系の固定を崩さずに済む」という前提が実測で裏付けられた。
+
+### CI ジョブの構成
+
+- **macOS のみ**（T3 で申告した変更のとおり）。`libavif` / `jpeg-xl` / `libraw` / `pkgconf` を
+  brew で入れ、ECM と kimageformats は `ExternalProject` が固定タグで取得する
+- 生成された `docs/format-matrix.md` を `format-matrix-macOS-codecs` として artifact 化した。
+  **OFF 側（21 形式）と ON 側（57 形式）を同じ run で並べて確認できる**
+- 既定の OFF パスは従来どおり両 OS の `build-and-test` が検証し続ける
+
+### 併せて直した順序依存（T3 で「提案のみ」としていた件の一部）
+
+`format-matrix` の生成が、ON のときプラグイン配置を待つようにした
+（`cmake/FormatMatrix.cmake` に `add_dependencies` を 1 つ）。
+**待たないとビルド順で内容が 21 形式にも 57 形式にもなる。** ローカルで
+ON = 57 / OFF = 21 が安定して出ることを確認した。
+
+**`dev` と `dev-codecs` が同じ `docs/format-matrix.md` を書く件は直していない**
+（T3 の申告どおり提案に留める）。CI は毎回まっさらなので影響しない。
+
+### T7: ADR-0014（EXIF 全体の保持は Phase 3 では導入しない）
+
+ADR-0003 が Phase 3 に送った宿題に決着をつけた。**コードは変更していない。**
+
+一次情報で確認したライセンス: exiv2 は **GPL-2.0-or-later**（`src/image.cpp` の SPDX）、
+libexif は **LGPL-2.1**（`COPYING`）。**どちらも GPLv3 と両立する。ライセンスは障害ではない。**
+
+見送る理由は 4 点で、最も大きいのは**「オプショナル依存」の枠に乗らないこと**である。
+追加コーデックは実行時に読み込まれるプラグインでアプリはリンクしないが、
+EXIF ライブラリは `src/core` か `src/io` が**リンクする**。同じ形にはできない。
+将来実装する際の条件 4 点を ADR-0014 に残した。
+
+### 変更ファイル
+
+- 追加: `docs/adr/0014-exif-preserve-all.md`
+- 変更: `.github/workflows/ci.yml`（`extra-codecs` ジョブ）、`cmake/FormatMatrix.cmake`（順序依存の修正）、`docs/progress/phase3.md`（本エントリ）
+- **`src/` の変更: なし**
+
+### 追加・変更したテスト
+
+**なし。** T4 のテストが ON 構成でそのまま走る（`ctest --preset dev-codecs` で 172 / 172）。
+**実コーデックのために形式名を書いたテストを足していない。**
+
+### 品質ゲートの実行結果
+
+| 実行 | 結果 |
+|---|---|
+| ローカル `ctest --preset dev` | **172 / 172 pass** |
+| CI run 31318145842（5 ジョブ） | **すべて success** |
+
+CI の 5 ジョブが 6 ゲート全数に加えて ON 構成のビルドとテストを担っている。
+
+### 推測で埋めた箇所
+
+**なし。**
+
+### 残課題 / 次にやること
+
+1. T8: 受け入れ基準 3 項目の検証、`docs/phases.md` の更新、PR
+2. `docs/format-matrix.md` の生成先がツリー間で共有されている件（提案のまま。未実装）
