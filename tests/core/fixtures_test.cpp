@@ -67,9 +67,9 @@ TEST_CASE("gradient_alpha carries a fully transparent pixel", "[fixtures]") {
 }
 
 TEST_CASE("with_text carries text metadata", "[fixtures]") {
-    // テキストは QImageReader::text() では取れない。実測（Qt 6.11.1）では
-    // textKeys() が空になり、デコード後の QImage::text() からしか読めない。
-    // T5 でメタデータ保持を実装するときも、読み取りはこの経路を使う。
+    // 読み取りは QImage::text() を使う。QImageReader::text() は
+    // tEXt が IDAT の前か後か、read() の前か後かで取れたり取れなかったりする。
+    // QImage::text() は取りこぼしが無い。
     const QImage image = QImage::fromData(readFixture(QStringLiteral("with_text.png")));
 
     REQUIRE_FALSE(image.isNull());

@@ -968,3 +968,138 @@ Phase 1 全体としての 400 行超過は承認済みだが、
    `QPainter` を `QCoreApplication` だけで使えること、アルファ合成の数値的正しさ）と
    食い違いがないか照合する。**食い違いがあれば報告する。**
 4. Windows の実機起動確認は Phase 0 から未了のまま。
+
+---
+
+## 2026-08-09 — T5 追補（サブエージェント調査との照合で実装の欠陥 2 件を修正）
+
+### 実施内容
+
+利用者の指示で使ったサブエージェント 2 件（Qt API の調査）の結果が届いたため、
+`docs/agent-protocol.md` §3 に従い**自分の実装と照合した。その結果、実装の欠陥が 2 件見つかった。**
+落ちるテストとして固定してから修正した。
+
+**サブエージェントの使い方**: §3 の「使ってよい領域（調査のみ）」に限定した。
+`src/core/` の実装とテストの期待値の決定には使っていない。
+調査結果には実測出力と根拠 URL を付けさせた。
+
+### 欠陥 1: 合成すると ICC が消える
+
+`QPainter` は描画先へ色空間を伝播しない。そのため `flattenOnto()` で合成した時点で
+入力の `QColorSpace` が失われ、**`IccPolicy::Embed` の指定が無視されていた。**
+
+修正: 合成後に `canvas.setColorSpace(source.colorSpace())` で明示的に引き継ぐ。
+
+**テストの前提を一度誤った。** 当初この回帰テストの出力形式を BMP にしたが落ち続けた。
+原因を確定させるため、`convert()` を通さず Qt が直接書いた場合を実測した。
+
+```
+bmp   write=1  readback colorSpace valid=0
+jpeg  write=1  readback colorSpace valid=1
+png   write=1  readback colorSpace valid=1
+tiff  write=1  readback colorSpace valid=1
+```
+
+**BMP はそもそも ICC を保持できない。** 実装ではなくテストの前提が誤っていた。
+出力形式を「アルファ非対応（＝合成が起きる）かつ ICC を保持できる」JPEG に変更した。
+**期待値は緩めていない。** 検証したい性質（合成で色空間を落とさない）はそのままで、
+成立しない実験条件を正した。
+
+### 欠陥 2: テキスト除去で索引色画像が壊れる
+
+`withoutText()` は生ビットから `QImage` を作り直すが、この方法は**テキスト以外の付随情報も落とす**。
+特に**カラーテーブルが失われる**ため、`Format_Indexed8` の画像は
+画素値（インデックス）が同じでも見た目が別物になる。
+DPI・`devicePixelRatio` も既定値へリセットされる。
+
+修正: `setColorTable()` / `setDotsPerMeterX/Y()` / `setDevicePixelRatio()` /
+`setColorSpace()` を明示的に戻す。
+
+検出のため**索引色フィクスチャ `indexed.png` を追加した**（4 色パレット、テキスト付き）。
+
+### 併せて行った改善: 合成の丸め精度
+
+調査で、`QPainter` の `SourceOver` は描画先のフォーマットで精度が変わることが実測された
+（16,777,216 サンプル）。
+
+| 描画先 | 理論値と完全一致 | 最大誤差 |
+|---|---|---|
+| `Format_RGB32` / `ARGB32_Premultiplied` | 76.3% | 0.98 LSB |
+| `Format_ARGB32` / `RGBA8888` | **99.995%** | **0.51 LSB** |
+
+`flattenOnto()` のキャンバスを `RGB32` から `ARGB32` に変え、最後に `RGB32` へ落とす形にした。
+1 行の変更で誤差が半減する。`docs/spec-core.md` §4 が「取りこぼしやすい」と明示した箇所であり、
+精度を上げておく価値があると判断した。
+
+### 前エントリの訂正: `QImageReader::text()` について
+
+T4 で「PNG のテキストは `QImageReader::text()` では取れない」と書いたが、**言い過ぎだった。**
+調査によれば、取れるかどうかは **tEXt チャンクが IDAT の前か後か**、
+および **`read()` の前か後か**で変わる。Qt 自身が書いた PNG は IDAT の前に置くため
+`read()` 前なら取れる。
+
+**結論（`QImage::text()` を使う）は変わらない**が、理由が違った。
+`QImage::text()` は取りこぼしが無いから使う、が正しい。
+コードとテストのコメントを訂正した。
+
+### 調査で判明したが今回は対応していないこと（記録）
+
+1. **ICO を読むと Qt が `_q_icoOrigDepth` という内部キーを注入する。**
+   `PreserveSupported` で ICO → PNG に変換すると、この内部キーが tEXt として出力に漏れる。
+   Phase 2 以降で ICO を扱うときに検討する。
+2. **ICNS は `supportsOption(Description)` が false を返すのに、内包する PNG 経由で
+   テキストがファイルに残る。** `supportsOption` は「バイト列にテキストが残らない保証」ではない。
+3. **`QImageWriter::setText()` は値を `simplified()` で潰し、キーに空白や `:` があると壊す。**
+   本実装は書き込みに `QImageWriter::setText()` を使っていないため影響を受けない。
+   フィクスチャ生成器では使っているが、単純なキーと値のみなので実害はない。
+4. **JPEG は `supportsOption(ImageTransformation)` が true を返すのに向き metadata を書かない。**
+   この戻り値を「metadata で保持できる形式か」の判定に使うと誤判定する。本実装は使っていない。
+5. **`autoTransform` の既定値は `false`。** 実測とソース（`UsePluginDefault` は無条件に false を返す）
+   の両方で確認された。公式ドキュメントに既定値の記述は無い。
+   本実装は既定に頼らず明示的に `setAutoTransform(false)` している。
+6. **`QPainter` は `QCoreApplication` だけで動く**（ラスタ描画のみ。`QFontDatabase` に触れると qFatal）。
+   本実装はテキスト描画をしないため問題ない。
+
+### 変更ファイル
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `src/core/Converter.cpp` | `flattenOnto()` の色空間引き継ぎと ARGB32 キャンバス化、`withoutText()` の付随情報復元 |
+| `tests/fixtures/generate.cpp` | 索引色フィクスチャ `indexed.png` を追加、コメント訂正 |
+| `tests/core/converter_test.cpp` | 回帰テスト 2 本を追加 |
+| `tests/core/fixtures_test.cpp` | `indexed.png` を大きさ検査の対象に追加、コメント訂正 |
+
+**追加 / 削除**: なし
+
+### 追加・変更したテスト（2 本追加。71 → 73）
+
+| テスト | 期待値 | 修正前 | 修正後 |
+|---|---|---|---|
+| `flatten keeps the colour space when icc is embed` | アルファ合成が起きても `IccPolicy::Embed` なら出力の色空間が有効 | **fail** | pass |
+| `strip all keeps indexed colours intact` | `StripAll` 後もテキストは消え、**索引色の見た目は変わらない** | **fail** | pass |
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **73 / 73 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev` | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **73 / 73 pass** |
+
+### 推測で埋めた箇所
+
+**なし。** サブエージェントの主張を鵜呑みにせず、
+**欠陥 2 件はいずれも自分のテストで再現させてから修正した。**
+BMP が ICC を保持できないことも、自分で実測して確定させた。
+
+### 残課題 / 次にやること
+
+1. **T6（`NamingRule`）に着手する。**
+2. その後 T7（`docs/format-matrix.md` のビルド時自動生成）で Phase 1 完了。
+3. 上記「対応していないこと」1〜3 は Phase 2 以降の検討事項として残る。
+4. Windows の実機起動確認は Phase 0 から未了のまま。

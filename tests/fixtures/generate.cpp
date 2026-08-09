@@ -165,7 +165,28 @@ int main(int argc, char* argv[]) {
                           QImageIOHandler::TransformationRotate90);
     ok = ok && checkSize(orientedPath);
 
-    // 6. 画像でないバイト列。ConvertError::DecodeFailed の検証に使う。
+    // 6. 索引色（パレット）画像。
+    //    テキスト除去でカラーテーブルを取りこぼすと見た目が壊れるため、その検出に使う。
+    const QString indexedPath = dir + QStringLiteral("/indexed.png");
+    {
+        QImage indexed(edge, edge, QImage::Format_Indexed8);
+        indexed.setColorCount(4);
+        indexed.setColor(0, qRgb(channelMax, 0, 0));
+        indexed.setColor(1, qRgb(0, channelMax, 0));
+        indexed.setColor(2, qRgb(0, 0, channelMax));
+        indexed.setColor(3, qRgb(channelMax, channelMax, 0));
+        for (int row = 0; row < edge; ++row) {
+            for (int column = 0; column < edge; ++column) {
+                indexed.setPixel(column, row, static_cast<uint>((column / 16 + row / 16) % 4));
+            }
+        }
+        indexed.setText(QStringLiteral("Description"), QStringLiteral("katachi fixture"));
+        ok = ok &&
+             writeImage(indexed, indexedPath, "png", {}, {}, QImageIOHandler::TransformationNone);
+        ok = ok && checkSize(indexedPath);
+    }
+
+    // 7. 画像でないバイト列。ConvertError::DecodeFailed の検証に使う。
     const QString brokenPath = dir + QStringLiteral("/not_an_image.bin");
     {
         QFile broken(brokenPath);
@@ -205,9 +226,10 @@ int main(int argc, char* argv[]) {
         out() << "  gradient_rgb.png: アルファなし\n";
     }
     {
-        // テキストは QImageReader::text() では取れない。
-        // 実測（Qt 6.11.1）では textKeys() が空になり、
-        // **デコード後の QImage::text() からしか読めない。**
+        // テキストの読み取りは QImage::text() を使う。
+        // QImageReader::text() は取れる場合と取れない場合があり、
+        // tEXt チャンクが IDAT の前か後か、read() の前か後かで結果が変わる。
+        // QImage::text() は取りこぼしが無い。
         // 書き出しは QImageWriter::setText() / QImage::setText() のどちらでも保持される。
         // libpng がテキスト付き PNG の読み込みで "Read Error" を標準エラーへ出すが、
         // read() は成功し内容も正しい。無害な雑音として扱う。

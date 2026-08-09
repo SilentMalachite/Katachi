@@ -17,6 +17,7 @@
 #include <QImage>
 #include <QImageIOHandler>
 #include <QImageReader>
+#include <QImageWriter>
 #include <QSize>
 #include <QString>
 
@@ -361,4 +362,58 @@ TEST_CASE("strip all removes orientation metadata", "[core][convert][metadata]")
     reader.setAutoTransform(false);
     reader.read();
     REQUIRE(reader.transformation() == QImageIOHandler::TransformationNone);
+}
+
+// ---------------------------- サブエージェント調査を受けて追加した回帰テスト
+// docs/agent-protocol.md §3 の調査結果を自分の実装と照合したところ、
+// 下記 2 件の欠陥が見つかった。まず落ちるテストとして固定してから直す。
+
+TEST_CASE("flatten keeps the colour space when icc is embed", "[core][convert][metadata]") {
+    // QPainter は描画先へ色空間を伝播しない。合成すると ICC が消える。
+    //
+    // 出力形式は「アルファ非対応（＝合成が起きる）」かつ「ICC を保持できる」必要がある。
+    // BMP はアルファ非対応だが ICC も保持できない（Qt が直接書いても失われる）ため使えない。
+    // JPEG は両方を満たす。
+    ConversionSpec spec = specFor(QStringLiteral("jpeg"));
+    spec.alpha = AlphaPolicy::Flatten;
+    spec.icc = IccPolicy::Embed;
+
+    // ICC 付きかつアルファ付きの入力を作るため、ICC 付き画像へアルファを足して符号化する。
+    QImage tinted =
+        decode(fixture(QStringLiteral("with_icc.png"))).convertToFormat(QImage::Format_ARGB32);
+    REQUIRE(tinted.colorSpace().isValid());
+    tinted.setPixelColor(0, 0, QColor(0, 0, 0, 0));
+    QByteArray encoded;
+    {
+        QBuffer sink(&encoded);
+        REQUIRE(sink.open(QIODevice::WriteOnly));
+        QImageWriter writer(&sink, "png");
+        REQUIRE(writer.write(tinted));
+    }
+    REQUIRE(decode(encoded).colorSpace().isValid());
+    REQUIRE(decode(encoded).hasAlphaChannel());
+
+    const auto result = convert(encoded, spec, qtTable());
+
+    REQUIRE(result.isOk());
+    REQUIRE(decode(result.value().bytes).colorSpace().isValid());
+}
+
+TEST_CASE("strip all keeps indexed colours intact", "[core][convert][metadata]") {
+    // テキスト除去を生ビットからの作り直しで行うと、カラーテーブルまで落ちる。
+    // 索引色画像では見た目が壊れる。
+    const QByteArray source = fixture(QStringLiteral("indexed.png"));
+    const QImage before = decode(source);
+    REQUIRE(before.colorCount() > 0);
+
+    ConversionSpec spec = specFor(QStringLiteral("png"));
+    spec.metadata = MetadataPolicy::StripAll;
+
+    const auto result = convert(source, spec, qtTable());
+
+    REQUIRE(result.isOk());
+    const QImage after = decode(result.value().bytes);
+    REQUIRE(after.textKeys().isEmpty());
+    REQUIRE(after.convertToFormat(QImage::Format_RGB32) ==
+            before.convertToFormat(QImage::Format_RGB32));
 }
