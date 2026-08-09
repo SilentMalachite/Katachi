@@ -64,10 +64,12 @@ enable_testing()
 include(cmake/QualityGates.cmake)
 include(cmake/UiRequirements.cmake)
 
+# tests/ より先に読む。KATACHI_EXTRA_PLUGIN_ROOT を tests/ が QT_PLUGIN_PATH に使う。
+include(cmake/ExtraCodecs.cmake)
+
 add_subdirectory(src/core)
 add_subdirectory(src/io)
 add_subdirectory(src/app)
 add_subdirectory(tests)
 
 include(cmake/FormatMatrix.cmake)
-include(cmake/ExtraCodecs.cmake)

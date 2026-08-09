@@ -425,3 +425,92 @@ T2 で「推測」と記した 2 点はいずれも実測に置き換わった�
 1. T4: ダミープラグインによる機械検査（`src/` を変えずに能力表へ現れることの自動テスト）
 2. T6 で Qt 6.8.3 での ON ビルドを確認する（上記「推測で埋めた箇所」2）
 3. `docs/format-matrix.md` の生成先がツリー間で共有されている件（提案のみ。未実装）
+
+---
+
+## 2026-08-09 — T4 完了。受け入れ基準 3 を機械検査にした
+
+### 実施内容
+
+テスト専用の `QImageIOPlugin` を追加し、**`src/` を 1 行も変えずにプラグインが
+能力表へ現れること**を自動テストにした。**実コーデックが無い環境でも成立する。**
+
+### 追加ファイル
+
+| ファイル | 役割 |
+|---|---|
+| `tests/plugins/TestFormatPlugin.cpp`（新規 157 行） | 架空の形式 1 つを提供する最小の `QImageIOPlugin`。「マジック 4 バイト + 幅 + 高さ + ARGB32 の画素列」。**無圧縮なので可逆、アルファも保つ。時刻も乱数も埋め込まない** |
+| `tests/plugins/testformat.json`（新規） | プラグインのメタデータ（`Keys` / `MimeTypes`） |
+| `tests/plugins/extra_codec_test.cpp`（新規 143 行） | 検査 6 本 |
+| `tests/CMakeLists.txt` | プラグインのビルドと `katachi_plugin_tests` の追加 |
+| `CMakeLists.txt` | `include(cmake/ExtraCodecs.cmake)` を `add_subdirectory(tests)` より前へ移した |
+
+### 追加したテストと結果（**期待値は計画時に決めたものと同じ。緩めていない**）
+
+| # | テスト | 期待値 | 結果 |
+|---|---|---|---|
+| 1 | `the test plugin is visible to Qt` | `QImageWriter::supportedImageFormats()` に架空形式が含まれる | pass |
+| 2 | `a newly added plugin appears in the capability table` | `find()` が値を返し `canDecode` かつ `canEncode` | pass |
+| 3 | `the probes classify the new plugin by measurement` | `supportsAlpha` かつ `isLossless`（ADR-0007 の往復実測） | pass |
+| 4 | `the new plugin becomes an output choice` | `encodable()` に含まれる | pass |
+| 5 | `the encodable set matches what Qt reports` | `encodable()` の id 集合 == `QImageWriter` の正規化集合（**完全一致**） | pass |
+| 6 | `every encodable format converts the gradient fixture` | 全 encodable 形式で `convert()` が成功し、出力を読み戻せてサイズが一致 | pass |
+
+**テスト 1 は前提の確認である。** `QT_PLUGIN_PATH` の設定漏れでプラグインが
+読み込まれていない場合、2〜4 は「空振りしているのに green」になりうる。
+それを防ぐために最初に置いた（不変条件スキャナの違反フィクスチャと同じ考え方）。
+
+**テスト 6 は 22 形式すべてで成功した。期待値を緩める必要は生じなかった。**
+
+### 承認された計画からの変更（申告）
+
+1. **テストの置き場所を `tests/core/extra_codec_test.cpp` から
+   `tests/plugins/extra_codec_test.cpp` へ変えた。** プラグイン本体と同じ場所にまとめた
+2. **テスト実行ファイルを分けた（`katachi_plugin_tests`）。** 計画では触れていなかった。
+   架空の形式が `katachi_tests` から見えると、core / io の既存テストが見る能力表まで
+   変わってしまう。**検査したいのは「置けば増える」ことであって、
+   既存テストの前提を動かすことではない。** app 層のテストを分けたのと同じ理由である
+
+### ON 構成での実測（テスト 5・6 が実コーデックも対象にすることの確認）
+
+`KATACHI_EXTRA_CODECS=ON` のとき、`QT_PLUGIN_PATH` にダミーと実コーデックの
+両方が入る。ctest が生成した設定を実際に確認した。
+
+```
+QT_PLUGIN_PATH=<build>/tests/test-plugins:<build>/plugins
+```
+
+`QT_DEBUG_PLUGINS=1` で、両方のディレクトリが探索され
+`katachi_test_plugin.so` と `kimg_avif.dylib` の双方が読み込まれることを確認した。
+**ON のときテスト 6 は AVIF / JPEG XL も変換対象にする。テスト側に形式名を足していない。**
+
+### 差分規模（停止条件 8。計画時に 250〜350 行と申告した）
+
+**実績 356 行（5 ファイル、+356 / -1）。** 申告した上限を 6 行超えたが、
+400 行の停止条件には達していない。内訳はプラグイン 157 / テスト 143 / 構成 53 / 定義 4。
+
+### 品質ゲートの実行結果（ローカル macOS / arm64、Qt 6.11.1）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **警告 0**（`-Werror` 下で moc 生成コードも通った） |
+| 2 | `ctest --preset dev` | **172 / 172 pass**（166 → 172） |
+| 3 | `clang-format --dry-run --Werror` | **指摘なし**（1 件あった `Q_PLUGIN_METADATA` の折り返しを整形して解消） |
+| 4 | `clang-tidy -p build/dev`（12 ファイル） | **指摘なし**（対象は `src/*.cpp` のみ。テストは対象外） |
+| 5 | `cmake --build --preset asan` / `ctest --preset asan` | exit 0 / **172 / 172 pass** |
+| 6 | `cmake --build --preset dev-codecs` / `ctest --preset dev-codecs` | exit 0 / **172 / 172 pass** |
+| 7 | 不変条件スキャナ + UI 検査（22 本） | **22 / 22 pass** |
+
+**ASan 下でも共有モジュールの読み込みで問題は出なかった。**
+
+### 推測で埋めた箇所
+
+**なし。** ON 構成でプラグインが実際に読み込まれていることは
+`QT_DEBUG_PLUGINS=1` の出力と ctest の生成物で確認しており、推測していない。
+
+### 残課題 / 次にやること
+
+1. T5 / T6: CI に ON ジョブを足し、**Qt 6.8.3 で kimageformats v6.20.0 がビルドできるか**を確認する
+   （T3 の「推測で埋めた箇所」2。ローカルは Qt 6.11.1 でしか確認していない）
+2. T7: ADR-0003 の宿題（EXIF 全体保持）に決着をつける
+3. T8: 受け入れ基準の検証と PR
