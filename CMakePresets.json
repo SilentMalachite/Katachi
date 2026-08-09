@@ -32,6 +32,14 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "KATACHI_SANITIZE": "ON"
       }
+    },
+    {
+      "name": "dev-codecs",
+      "inherits": "dev",
+      "displayName": "dev-codecs - dev + 追加コーデック (ADR-0013)",
+      "cacheVariables": {
+        "KATACHI_EXTRA_CODECS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -42,6 +50,10 @@
     {
       "name": "asan",
       "configurePreset": "asan"
+    },
+    {
+      "name": "dev-codecs",
+      "configurePreset": "dev-codecs"
     }
   ],
   "testPresets": [
@@ -55,6 +67,13 @@
     {
       "name": "asan",
       "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "dev-codecs",
+      "configurePreset": "dev-codecs",
       "output": {
         "outputOnFailure": true
       }

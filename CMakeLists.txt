@@ -28,6 +28,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(KATACHI_SANITIZE "Enable AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 
+# 追加コーデック（ADR-0013）。**既定 OFF のままにする。**
+# 既定パスが常に「追加コーデックが無い環境」になり、docs/phases.md §4 Phase 3 の
+# 受け入れ基準 2 が日常の品質ゲートで検証され続ける。
+option(KATACHI_EXTRA_CODECS "Build the optional AVIF / JPEG XL / PSD / RAW image plugins" OFF)
+
 # CLAUDE.md: Qt 6.8 LTS 以上。Qt は LGPLv3 のため動的リンクのみ（docs/licenses.md）。
 # Concurrent は QtConcurrent::mapped（docs/spec-core.md §6）のために要る。
 # qtbase 同梱のはずだが「入っているはず」で進めない。CI で実際に通ることを確認する
@@ -65,3 +70,4 @@ add_subdirectory(src/app)
 add_subdirectory(tests)
 
 include(cmake/FormatMatrix.cmake)
+include(cmake/ExtraCodecs.cmake)

@@ -297,3 +297,131 @@ KDE 側のビルド設定（`KDECMakeSettings` 等）が我々の `-Werror` に�
 1. **ADR-0013 の承認**（ライセンスの判断を含むため停止条件 7）
 2. **HEIF を対象に加えるかの再判断。** 除外理由がライセンスから依存の重さへ変わったため
 3. 承認後に T3（枠組み）へ進む
+
+---
+
+## 2026-08-09 — ADR-0013 承認。T3 完了（オプショナル依存の枠組み）
+
+利用者の判断: **ADR-0013 を承認。HEIF は除外のまま。** ADR-0013 の状態を承認に更新した。
+
+### 実施内容
+
+`KATACHI_EXTRA_CODECS`（**既定 OFF**）を追加し、ON のときだけ ECM と kimageformats を
+固定タグで別ビルドして 4 プラグインを配置する仕組みを作った。**`src/` は 1 行も変更していない。**
+
+### 追加した構成
+
+| ファイル | 役割 |
+|---|---|
+| `cmake/ExtraCodecs.cmake`（新規） | `ExternalProject_Add` で ECM v6.20.0 / kimageformats v6.20.0 をビルドする |
+| `cmake/CollectExtraCodecs.cmake`（新規） | `cmake -P` で走り、4 プラグインだけを配置する。1 つでも欠けたら `FATAL_ERROR` |
+| `CMakeLists.txt` | `option(KATACHI_EXTRA_CODECS … OFF)` と `include` |
+| `CMakePresets.json` | `dev-codecs`（configure / build / test）を追加 |
+| `docs/spec-core.md` §1 | ディレクトリ図に上記 2 ファイルを追記（計画時に承認済み） |
+
+**CMake ファイルが 2 つに分かれた理由を申告する。** kimageformats の install 先の階層は
+KDE 側の設定で決まり、**構成時には確定していない。** 推測で決め打ちせず、ビルド時に
+実際に探して配置するため、スクリプトモードで走る 2 つ目のファイルが要った。
+
+### ON パスの実測（**2 段階で確認した**）
+
+**段階 1: 依存が欠けている状態。** `libavif` が未導入の状態でビルドしたところ、
+`kimg_psd` / `kimg_raw` / `kimg_jxl` は生成され、**`kimg_avif` だけが作られず、
+ビルドが理由付きで停止した。**
+
+```
+CMake Error at cmake/CollectExtraCodecs.cmake:62 (message):
+  KATACHI_EXTRA_CODECS=ON だが、次のプラグインが作られていない: kimg_avif
+```
+
+**「ON にしたのに黙って対応形式が減る」が起きないことを、実際に起こして確認した。**
+Phase 1 の `qtimageformats` の取りこぼしと同じ失敗の形を、今回は機械が検出した。
+
+**段階 2: 依存を揃えた状態。** 利用者の許可を得て `brew install libavif`（1.4.2）を実行し、
+再ビルドしたところ 4 つすべてが配置された。
+
+```
+-- 追加コーデックを配置: kimg_psd.dylib;kimg_raw.dylib;kimg_avif.dylib;kimg_jxl.dylib
+```
+
+### 受け入れ基準 3 の実証（**src/ 無変更で能力表が増えた**）
+
+同じ `katachi_format_matrix` の実行結果を比べた。
+
+| | 形式数 |
+|---|---|
+| OFF（`build/dev`） | **21** |
+| ON（`build/dev-codecs`） | **57** |
+
+増えた 36 件: `avif` `avifs` `jxl` `psd` `psb` `pdd` `psdt` と RAW の 29 拡張子
+（`arw` `cr2` `cr3` `nef` `dng` `orf` `raf` `rw2` 等）。
+**このうち書き出しも可能なのは `avif` と `jxl` の 2 つ**で、残りは読み込み専用である
+（ADR-0007 のとおり、書き出せない形式のアルファ / 品質 / 可逆は `-` になる）。
+
+`src/` にもテストにも手を入れずにこの差が出た。**受け入れ基準 3 はこの実測で満たされている。**
+
+### 実験で確かめた Qt の挙動（推測ではない）
+
+配置先を `${CMAKE_BINARY_DIR}/plugins/imageformats` にしたところ、`QT_PLUGIN_PATH` を
+**設定しなくても**プラグインが読み込まれた。理由を推測せず実験した。
+
+`build/dev/plugins/imageformats` という空ディレクトリを作ると、`build/dev` の実行ファイルの
+探索先一覧に**そのディレクトリが現れ**、削除すると**消えた**（`QT_DEBUG_PLUGINS=1` で確認）。
+
+> **Qt は実行ファイルと同じ階層の `plugins/<種別>/` を、存在すれば自動で探索する。**
+
+**ただしテスト実行ファイルは `build/<preset>/tests/` にあるため、この自動探索の対象外である。**
+T4 / T6 でテストからプラグインを見せるには `QT_PLUGIN_PATH` が要る。
+
+### 承認された計画からの変更（申告）
+
+1. **T6 の CI の ON ジョブを macOS のみにしたい。** Windows で ON を通すには
+   libavif / libjxl / LibRaw / ECM を vcpkg で用意する必要があり、Phase 3 の
+   ビルド基盤変更として大きすぎる。**既定の OFF パスは従来どおり Windows でも検証される。**
+   計画では OS を限定していなかったため、変更として申告する
+2. **`docs/format-matrix.md` を 2 つのビルドツリーが同じ場所へ書く。**
+   `dev` と `dev-codecs` のどちらが最後にビルドしたかで内容（21 形式 / 57 形式）が変わる。
+   生成物は `.gitignore` 済みで、`tests/core/format_matrix_test.cpp` はどちらでも green だが、
+   **順序依存であることは記録しておく。** 直すなら生成先をツリーごとに分ける。
+   **今回は直していない**（提案に留める）
+
+### 変更ファイル
+
+- 追加: `cmake/ExtraCodecs.cmake`、`cmake/CollectExtraCodecs.cmake`
+- 変更: `CMakeLists.txt`、`CMakePresets.json`、`docs/spec-core.md`、`docs/adr/0013-extra-codecs.md`（状態を承認へ）、`docs/progress/phase3.md`（本エントリ）
+- **`src/` の変更: なし**
+
+### 追加・変更したテスト
+
+**なし。** T3 は構成のみ。テストは T4 で追加する（計画どおり）。
+
+### 品質ゲートの実行結果（ローカル macOS / arm64、Qt 6.11.1。**既定の OFF 構成**）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --preset dev` / `cmake --build --preset dev` | exit 0 / **警告 0** |
+| 2 | `ctest --preset dev` | **166 / 166 pass** |
+| 3 | `clang-format --dry-run --Werror`（22.1.8、86 ファイル） | **指摘なし** |
+| 4 | `clang-tidy -p build/dev`（12 ファイル） | **指摘なし**（exit 0） |
+| 5 | `cmake --preset asan` / `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan` | **166 / 166 pass** |
+
+加えて ON 構成: `cmake --preset dev-codecs` / `cmake --build --preset dev-codecs` が
+**exit 0**（4 プラグイン配置）。**ON 構成での `ctest` はまだ回していない**（T4 でテストを足してから）。
+
+### 推測で埋めた箇所
+
+**なし。**
+T2 で「推測」と記した 2 点はいずれも実測に置き換わった。
+
+1. 「別々の Qt に対してビルドされたプラグインは混ぜられない」→ **回避したので検証不要になった。**
+   kimageformats を**我々と同じ Qt 6.11.1 に対してビルドし**、正常に読み込まれることを確認した
+2. 「kimageformats v6.20.0 が Qt 6.8.3 でビルドできるか」→ **ローカルは Qt 6.11.1 で成功した。
+   Qt 6.8.3 での成功はまだ確認していない**（CI の ON ジョブ = T6 で確認する）。
+   これは未確認であって推測ではない。**確認するまで「Qt 6.8 で動く」とは書かない**
+
+### 残課題 / 次にやること
+
+1. T4: ダミープラグインによる機械検査（`src/` を変えずに能力表へ現れることの自動テスト）
+2. T6 で Qt 6.8.3 での ON ビルドを確認する（上記「推測で埋めた箇所」2）
+3. `docs/format-matrix.md` の生成先がツリー間で共有されている件（提案のみ。未実装）
