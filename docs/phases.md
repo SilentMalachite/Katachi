@@ -164,11 +164,16 @@ CLAUDE.md の「絶対禁止」を機械化したもの。人手のレビュー�
 | `resize` の補間方式 | **`Qt::SmoothTransformation` 固定** | 選択肢を増やすと決定性テストの組み合わせが増える。可変にするなら ADR を書いてから |
 | `convert()` の入力型 | **`QByteArray`**（`spec-core.md` §2 で確定） | — |
 | `JobRunner` の注入方式 | **テンプレート引数で注入**（`cpp-conventions.md` §2.3） | 同 §2.3 の表で決定済み。`std::function` 案は採らない |
+| メタデータ保持の実装手段 | **`MetadataPolicy::PreserveAll` を `PreserveSupported` に改名**し、向き / テキスト / ICC のみ保持する。EXIF 全体の保持は Phase 3 | Phase 1 着手時に Qt 6.8 の公式ドキュメントで確認したところ、EXIF 全体を読み書きする API が存在しなかった（**ADR-0003**） |
+| `convert()` の警告の返し方 | **成功値を `ConversionOutput` にし、`warnings` を載せる** | `spec-core.md` §4 が要求する警告の置き場所が `Result<QByteArray, ConvertError>` に無かった（**ADR-0004**） |
+| 衝突ポリシーの担当層 | **core は名前の生成のみ。衝突の解決は Phase 2 の `src/io`** | 衝突判定にファイルシステム参照が要り、core では禁止されているため（**ADR-0005**） |
 
 ### 5.2 未解決（Phase 1 着手時に決める）
 
-1. **メタデータ保持の実装手段** — Qt 単体では EXIF の完全な保持が難しい。`MetadataPolicy::PreserveAll` を Phase 1 で実装するか、Phase 3 に送るか。
-   **Phase 1 着手時に、使用する Qt バージョンの EXIF / ICC の実挙動を公式ドキュメントで確認してから判断する。今は推測しない**（`cpp-conventions.md` §3）。
+**該当なし。** かつてここにあった「メタデータ保持の実装手段」は、Phase 1 着手時に
+Qt 6.8 の公式ドキュメントで実挙動を確認したうえで決定し、§5.1 へ移した（ADR-0003）。
+
+新たに未解決事項が生じた場合はここに追記する。**推測で埋めず、決めた根拠を ADR に残すこと。**
 
 ### 5.3 Phase 2 着手時に決める
 

@@ -84,13 +84,21 @@ enum class ConvertError {
     AlphaLossNotAllowed,   // アルファ画像を非対応形式へ Reject 指定で変換
     ImageTooLarge,         // 上限は ConversionSpec::maxPixels
 };
+
+// 変換は成功したが、指定どおりには処理できなかったことの通知（ADR-0004）。
+// エラーではないため Result の E ではなく、成功値の側に載せる。
+enum class ConvertWarning {
+    AlphaFlattenedFallback,   // §4 3 行目: Preserve 指定だが出力形式が非対応のため Flatten した
+};
 ```
 
 ```cpp
 // 値型。メンバは非 const（集成体初期化とコピー代入を壊さないため）だが、
 // 「生成後に書き換えない」ことを規約とする。受け渡しは常に const 参照。
 enum class AlphaPolicy    { Preserve, Flatten, Reject };
-enum class MetadataPolicy { PreserveAll, StripAll };
+// PreserveSupported は「Qt が扱える範囲」＝ 向き / テキスト / ICC を保持する。
+// EXIF 全体の保持は Qt 単体では不可能（ADR-0003）。
+enum class MetadataPolicy { PreserveSupported, StripAll };
 enum class IccPolicy      { Embed, Strip };
 
 struct ConversionSpec {
@@ -99,7 +107,7 @@ struct ConversionSpec {
     std::optional<QSize> resize       = std::nullopt;   // アスペクト比は常に保持
     AlphaPolicy          alpha        = AlphaPolicy::Preserve;
     QColor               flattenColor = Qt::white;
-    MetadataPolicy       metadata     = MetadataPolicy::PreserveAll;
+    MetadataPolicy       metadata     = MetadataPolicy::PreserveSupported;
     IccPolicy            icc          = IccPolicy::Embed;
     qint64               maxPixels    = 268'435'456;    // 16384 x 16384
 };
@@ -109,7 +117,15 @@ struct ConversionSpec {
 // Converter.hpp — 本アプリの心臓部。
 // 純粋関数：ファイルシステム・時刻・グローバル状態・乱数に触れない。
 // 同一入力に対して常に同一出力（バイト列）を返す。
-[[nodiscard]] Result<QByteArray, ConvertError>
+
+// 成功値。警告はエラーではないため E 側ではなくここに載せる（ADR-0004）。
+// 両メンバとも nothrow move 構築可能なので ResultValue を満たす。
+struct ConversionOutput {
+    QByteArray                  bytes;
+    std::vector<ConvertWarning> warnings;
+};
+
+[[nodiscard]] Result<ConversionOutput, ConvertError>
 convert(const QByteArray& source,
         const ConversionSpec& spec,
         const CapabilityTable& caps) noexcept;
@@ -166,7 +182,7 @@ static_assert(CapabilitySource<CapabilityTable>);   // 契約の明文化
 | 入力 | 出力形式 | AlphaPolicy | 挙動 |
 |---|---|---|---|
 | アルファあり | 対応 | 任意 | そのまま保持 |
-| アルファあり | 非対応 | `Preserve` | **`Flatten` にフォールバックし、警告を結果に含める** |
+| アルファあり | 非対応 | `Preserve` | **`Flatten` にフォールバックし、`ConversionOutput::warnings` に `ConvertWarning::AlphaFlattenedFallback` を 1 件積む**（ADR-0004） |
 | アルファあり | 非対応 | `Flatten` | `flattenColor` で合成 |
 | アルファあり | 非対応 | `Reject` | `ConvertError::AlphaLossNotAllowed` |
 | アルファなし | 任意 | 任意 | そのまま |
@@ -180,6 +196,13 @@ static_assert(CapabilitySource<CapabilityTable>);   // 契約の明文化
 ## 5. 命名規則（純粋関数）
 
 ```cpp
+enum class NamingError {
+    EmptyPattern,        // pattern が空
+    UnknownPlaceholder,  // {} 内が既知の名前でない
+    InvalidIndexSpec,    // {index:...} の桁指定が不正
+    EmptyResult,         // 展開結果が空になった
+};
+
 // 例: "{name}_{index:03}.{ext}" → "photo_001.png"
 [[nodiscard]] Result<QString, NamingError>
 resolveOutputName(const QString& sourceBaseName, int index,
@@ -188,6 +211,12 @@ resolveOutputName(const QString& sourceBaseName, int index,
 
 衝突ポリシー: `Overwrite` / `Skip` / `Rename`（`_1`, `_2` を付与）。
 既定は **`Skip`**（破壊的操作を既定にしない）。
+
+> **衝突ポリシーの適用は core に置かない（ADR-0005）。**
+> 衝突判定には出力先の実在確認、すなわちファイルシステム参照が要る。
+> core ではファイルアクセスが禁止されているため実装できない。
+> `resolveOutputName()` は**名前の生成のみ**を担い、衝突の解決は
+> **Phase 2 の `src/io` 層**で行う。
 
 ---
 
