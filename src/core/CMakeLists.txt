@@ -3,10 +3,19 @@
 #   #include <QWidget> のようなフラットヘッダは include パスに無く、コンパイル時に落ちる。
 # 不変条件スキャナ INV4 はテキスト上の検出を担い、リンク構成が実体を担保する。
 #
-# T1 時点の core はヘッダのみ（Concepts.hpp / Result.hpp）のため INTERFACE ライブラリ。
-# FormatId.cpp が入る T2 で STATIC へ変更する。
-add_library(katachi_core INTERFACE)
+# T3 で CapabilityTable.cpp が入ったため INTERFACE から STATIC へ変更した。
+add_library(
+    katachi_core STATIC
+    CapabilityTable.cpp
+    CapabilityTable.hpp
+    Concepts.hpp
+    ConvertError.hpp
+    FormatId.hpp
+    Result.hpp)
 
-target_include_directories(katachi_core INTERFACE "${PROJECT_SOURCE_DIR}/src")
+target_include_directories(katachi_core PUBLIC "${PROJECT_SOURCE_DIR}/src")
 
-target_link_libraries(katachi_core INTERFACE Qt6::Core Qt6::Gui)
+target_link_libraries(
+    katachi_core
+    PUBLIC Qt6::Core Qt6::Gui
+    PRIVATE katachi_warnings katachi_sanitizers)

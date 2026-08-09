@@ -559,3 +559,123 @@ Qt は `jpeg` / `jpg` / `jfif` を別々に報告するため、正規化する�
 2. T3 で `katachi_core` を `INTERFACE` から `STATIC` へ変更する。
 3. T3 で clang-tidy ゲートが core ヘッダに届くようになる。新たな指摘が出ないか確認する。
 4. Windows の実機起動確認は Phase 0 から未了のまま。
+
+---
+
+## 2026-08-09 — T3 完了（`CapabilityTable` と `CapabilitySource` concept）
+
+### 実施内容
+
+能力表を実装した。指示のあった「正規化後の重複の統合」を `mergeById()` として実装し、
+`buildFromQt()` と `fromCapabilities()` の両方に適用した。
+
+### 判断を仰いだ事項と回答
+
+`FormatCapability` の `supportsAlpha` / `isLossless` に相当する Qt の API が存在しないことが
+実装中に判明した（`QImageIOHandler::ImageOption` の全列挙を確認済み）。停止して指示を仰いだ。
+
+| # | 事項 | 判断（利用者回答） |
+|---|---|---|
+| 1 | `supportsAlpha` / `isLossless` の決め方 | **メモリ上の往復で実測する。** ADR-0007 |
+| 2 | 書き出し不可な形式の 2 フィールド | **`false` にして根拠を記録する。** ADR-0007 |
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/core/CapabilityTable.hpp` | `FormatCapability` と `CapabilityTable` |
+| `src/core/CapabilityTable.cpp` | 実測探針、`mergeById()`、契約の `static_assert` |
+| `tests/core/capability_table_test.cpp` | 実行時テスト 10 本 + `static_assert` 3 本 |
+| `docs/adr/0007-capability-probing.md` | 実測方式の決定と、判定不能時の扱い |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `src/core/CMakeLists.txt` | **`INTERFACE` → `STATIC`**（`CapabilityTable.cpp` が入ったため） |
+| `src/core/Concepts.hpp` | `CapabilitySource` concept を追加 |
+| `tests/CMakeLists.txt` | `capability_table_test.cpp` を追加 |
+
+**削除**: なし
+
+### 設計上の判断
+
+**`Concepts.hpp` が `CapabilityTable.hpp` を include する。** 逆ではない。
+`CapabilitySource` が `FormatCapability` を参照するため、逆向きにすると循環する。
+そのため `static_assert(CapabilitySource<CapabilityTable>)` は **`CapabilityTable.cpp` に置いた**。
+`docs/spec-core.md` §3 はこの `static_assert` をクラス定義の直後に示しているが、
+ヘッダに置くと循環するため配置のみ変えた。契約はコンパイル時に検証される。
+
+**`find()` の引数を `FormatId` の値渡しから `const FormatId&` に変えた。**
+`performance-unnecessary-value-param` が error を出したため（`FormatId` は `QString` を持つ）。
+`fromCapabilities()` は仕様どおり値渡しを維持し、`mergeById()` へ `std::move` して
+実際に消費することで同チェックを満たした。
+
+**`mergeById()` の統合規則**: 真偽値は論理和、`extensions` は和集合（重複除去 + 昇順）。
+`QMap` を使うため結果は id 昇順で決定的になる。
+
+### clang-tidy が core に届いた結果（T2 で予告した確認）
+
+`CapabilityTable.cpp` が入ったことで、clang-tidy ゲートの対象が
+`src/app` の 2 本から **`src/core/CapabilityTable.cpp` を含む 3 本**になった。
+予告どおり新たな指摘が出たため、すべてコード側で解消した（抑制は一切していない）。
+
+| 指摘 | 対処 |
+|---|---|
+| `readability-magic-numbers` / `cppcoreguidelines-avoid-magic-numbers`（色成分・画像サイズ） | 名前付き `constexpr` 定数へ |
+| `readability-identifier-length`（ループ変数 `x` / `y`、変数 `id`） | `column` / `row` / `formatId` へ改名 |
+| `misc-include-cleaner`（`std::vector` / `std::optional` / `QList` 等） | 直接 include を追加 |
+| `modernize-return-braced-init-list` | `return {first, last};` へ |
+| `modernize-use-ranges` | `std::ranges::find_if` / `std::ranges::copy_if` へ |
+| `performance-unnecessary-value-param` | `find()` を `const&` に、`mergeById()` で `std::move` 消費 |
+| `performance-move-const-arg` | `QMap::insert` は値を `const&` で受けるため `std::move` を外した |
+
+### 追加・変更したテスト（10 本追加。32 → 42）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `buildFromQt reports a non empty encodable set including PNG` | `encodable()` が空でなく、PNG が `canEncode` | pass |
+| `buildFromQt yields exactly one entry per FormatId` | 重複 id が無い。Qt の全報告名を正規化しても行き先が必ず 1 件存在する | pass |
+| `buildFromQt merges jpeg aliases into a single entry` | `jpeg` / `jpg` / `jfif` が同一 id。`extensions` に別名が残る | pass |
+| `buildFromQt classifies PNG as lossless with alpha` | `supportsAlpha` かつ `isLossless` | pass |
+| `buildFromQt classifies JPEG as lossy without alpha` | `!supportsAlpha` かつ `!isLossless` かつ `supportsQuality` | pass |
+| `buildFromQt leaves unprobeable fields false for read only formats` | 書き出し不可な全形式で 3 フィールドが `false` | pass |
+| `find returns nullopt for an unknown format` | 未登録 id で `std::nullopt` | pass |
+| `fromCapabilities merges entries that normalize to the same id` | 3 件が 1 件へ。真偽値は論理和、`extensions` は和集合 | pass |
+| `encodable returns only entries that can encode` | `canEncode` の項目のみ | pass |
+| `encodable is ordered deterministically` | id 昇順で整列している | pass |
+
+`static_assert`: 肯定 `CapabilitySource<CapabilityTable>`、
+**否定 `!CapabilitySource<int>` と `!CapabilitySource<FormatId>`**。
+
+読み込み専用形式のテストは、どの形式が読み込み専用かが環境で変わるため、
+`QImageReader` と `QImageWriter` の差集合をテスト側で計算している。
+`spec-core.md` §3 に無いメンバ（全項目を返す取得子）を足さずに済ませるため。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **42 / 42 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev`（対象 3 ファイル） | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **42 / 42 pass** |
+
+### 推測で埋めた箇所
+
+**なし。** `supportsAlpha` / `isLossless` の判定方式は実測に基づき、
+判定不能な場合の扱いは指示を仰いで決めた。
+
+### 残課題 / 次にやること
+
+1. **T4（テストフィクスチャの生成）に着手する。** `tests/fixtures/generate.cpp`。
+   `docs/phases.md` §2.4: 自前生成のみ・各 50KB 未満・生成スクリプトを残す。
+2. その後 T5（`ConversionSpec` と `convert()`）。**Phase 1 の心臓部。**
+3. `isLossless` は白黒 2 値の探針で判定するため、色を表現できない形式
+   （`pbm` / `xbm` 等）も `lossless` と出る。任意の入力に対する可逆性ではない。
+   ADR-0007 に明記済み。**T5 のラウンドトリップテストで形式を選ぶ際に注意する。**
+4. Windows の実機起動確認は Phase 0 から未了のまま。

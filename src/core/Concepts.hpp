@@ -7,8 +7,13 @@
 // ByteSource / ByteSink / ProgressSink は IoError を参照するため src/io/IoConcepts.hpp に置く
 // （core に置くと依存方向 core → io → app が逆流する）。
 
+#include "core/CapabilityTable.hpp"
+#include "core/FormatId.hpp"
+
 #include <concepts>
+#include <optional>
 #include <type_traits>
+#include <vector>
 
 namespace katachi::core {
 
@@ -24,5 +29,15 @@ concept ResultValue = std::destructible<T> && std::is_nothrow_move_constructible
 template <typename E>
 concept ResultError =
     std::destructible<E> && std::copy_constructible<E> && std::equality_comparable<E>;
+
+// 能力表の抽象（docs/cpp-conventions.md §2.2）。
+// 用途は static_assert による契約の明文化に留める（同 §2.3）。
+// convert() は具象 CapabilityTable を受け取り、テンプレート化しない。
+// 差し替えたいのは能力表の「中身」であって型ではなく、fromCapabilities() で足りるため。
+template <typename T>
+concept CapabilitySource = requires(const T& source, FormatId format) {
+    { source.find(format) } -> std::same_as<std::optional<FormatCapability>>;
+    { source.encodable() } -> std::same_as<std::vector<FormatCapability>>;
+};
 
 } // namespace katachi::core
