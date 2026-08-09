@@ -703,3 +703,96 @@ Phase 3 の 3 項目を `- [x]` にし、根拠の表を添えた。
 1. PR の作成とマージ
 2. Phase 4（配布）では、**同梱するプラグインの第三者ライセンス文**が要る（`docs/licenses.md` §4 / ADR-0013 の帰結）
 3. Phase 4 では「対応形式が OS によって異なる」ことを利用者向けに説明する必要がある
+
+---
+
+## 2026-08-09 — PR #5 をマージし Phase 3 をクローズ
+
+### 実施内容
+
+`docs/phases.md` §1「1 Phase = 1 ブランチ = 1 PR」に従い PR #5 を作成し、
+CI green を確認して `main` にマージした。マージ後の `main` も検証した。
+
+### PR とマージの結果
+
+| 項目 | 値 |
+|---|---|
+| PR | [#5](https://github.com/SilentMalachite/Katachi/pull/5) `Phase 3: 拡張コーデック（AVIF / JPEG XL / PSD / RAW をオプショナル依存で追加）` |
+| base | `main` |
+| merge commit | **`4e9678c`**（マージコミット方式。PR #2 / #3 と同じ） |
+| 取り込み | **10 コミット / 16 ファイル / +1,597 行 / -4 行** |
+| `phase3` ブランチ | マージ後に削除（履歴は `main` に残る） |
+
+### マージ前に確認したこと
+
+| 確認 | 結果 |
+|---|---|
+| PR checks 5 件 | **すべて SUCCESS**（ON ジョブを含む） |
+| `mergeStateStatus` | `CLEAN`（コンフリクト無し） |
+| ローカル 6 ゲート（OFF 構成） | **172 / 172 pass**、警告 0、指摘 0 |
+| ローカル ON 構成 | ビルド exit 0 / **172 / 172 pass** |
+
+**checks が実行中の状態ではマージしていない。**
+
+### マージ後の `main` の検証
+
+**ローカル（macOS 14 / arm64、Qt 6.11.1、LLVM 22.1.8）**
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **警告 0** |
+| 2 | `ctest --preset dev` | **172 / 172 pass** |
+| 3 | `clang-format --dry-run --Werror` | **指摘なし** |
+| 4 | `clang-tidy -p build/dev` | **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan` | **172 / 172 pass** |
+
+**CI（run 31318775095、commit `4e9678c`）— 5 ジョブすべて success**
+
+| ジョブ | 結果 |
+|---|---|
+| ビルド + テスト (macOS) | success |
+| ビルド + テスト (Windows) | success |
+| clang-format + clang-tidy (macOS) | success |
+| **追加コーデック ON (macOS)** | success |
+| ASan + UBSan (macOS) | success |
+
+### Phase 3 の到達点（`docs/phases.md` §1 の「対応フォーマットが広がる」）
+
+`KATACHI_EXTRA_CODECS=ON` でビルドすると、AVIF / JPEG XL / PSD / RAW が
+**コード変更なしに**能力表・UI の出力候補・変換の対象に加わる（21 形式 → 57 形式）。
+既定は OFF で、追加コーデックが無い環境でも従来どおり動く。
+
+**`src/` は 1 行も変更していない。** 受け入れ基準 3 項目はすべて達成した。
+テストは 166 → **172**。ADR-0013 / ADR-0014 を追加した。
+
+### クローズ時点で未達・対象外として残すもの（**「全部できた」とは書かない**）
+
+| 項目 | 状態 |
+|---|---|
+| Windows での追加コーデック | **未対応。** ON ジョブは macOS のみ（T3 で申告・承認済み） |
+| HEIF | **対象外。** macOS は `qmacheif` で読み書き可、Windows は使えないまま（ADR-0013） |
+| EXIF 全体の保持（`PreserveAll`） | **見送り。** 条件付きで将来へ持ち越し（ADR-0014） |
+| 多フレーム GIF | **非スコープのまま**（`docs/spec-core.md` §8） |
+| `docs/format-matrix.md` の生成先がツリー間で共有 | **未修正。** 提案のまま |
+| 追加コーデック ON でのアプリ実機起動 | **未確認。** ビルドとテストのみ |
+| **Phase 2 の未達 2 件**（キーボードのみの実操作 / Windows 実機起動） | **引き続き未達。** Phase 3 とは独立 |
+
+### 品質ゲートの実行結果
+
+上記「マージ後の `main` の検証」のとおり。6 ゲート全数をローカルで実行し、
+マージコミット `4e9678c` に対しては CI の 5 ジョブが担っている。
+
+### 推測で埋めた箇所
+
+**なし。**
+
+### 残課題 / 次にやること
+
+1. Phase 4（配布）。`macdeployqt` / `windeployqt`、署名・公証、インストーラ
+2. Phase 4 では **同梱するプラグインの第三者ライセンス文**が要る（`docs/licenses.md` §4 / ADR-0013 の帰結）。
+   追加コーデックを同梱するなら libavif / libjxl / LibRaw の分も含める
+3. Phase 4 では「**対応形式が OS によって異なる**」ことを利用者向けに説明する必要がある
+4. Phase 2 の未達 2 件（利用者にお願いする項目）
+5. `src/` 内の `QStringLiteral` 禁止スキャナ（`phase2.md` 末尾の提案。未実装）
+6. `.serena/` は未追跡のまま
