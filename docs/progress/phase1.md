@@ -679,3 +679,144 @@ Qt は `jpeg` / `jpg` / `jfif` を別々に報告するため、正規化する�
    （`pbm` / `xbm` 等）も `lossless` と出る。任意の入力に対する可逆性ではない。
    ADR-0007 に明記済み。**T5 のラウンドトリップテストで形式を選ぶ際に注意する。**
 4. Windows の実機起動確認は Phase 0 から未了のまま。
+
+---
+
+## 2026-08-09 — T4 完了（テストフィクスチャの生成）
+
+### 実施内容
+
+`tests/fixtures/generate.cpp` を実装し、T5 が必要とする画像を生成できるようにした。
+生成器は**自分で検証し、意図した性質が保たれていなければ非ゼロ終了する。**
+
+### 決めた事項: 生成物はコミットせずビルド時に生成する
+
+T0 の計画で「実装時に決める」としていた点。**ビルド時生成**を採った。
+
+- 生成器と成果物が乖離しない（コミットすると `generate.cpp` を直しても古い画像が残りうる）
+- git にバイナリを置かない（レビューできない差分を作らない）
+- `< 50KB` の制約を生成のたびに機械的に検査できる
+
+`docs/phases.md` §2.4 は「`tests/fixtures/` には自前で生成した小さな画像のみ」と書いており、
+その置き場所がリポジトリ内かビルドディレクトリかは指定していない。
+生成器を残すという要件（同 §2.4）は満たしている。
+
+`git ls-files` で画像バイナリが 1 つも管理下に無いことを確認済み。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `tests/fixtures/generate.cpp` | フィクスチャ生成器。大きさと性質を自己検証する |
+| `tests/core/fixtures_test.cpp` | フィクスチャが T5 の前提を満たすかのテスト 7 本 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `tests/CMakeLists.txt` | `katachi_fixture_gen` と `katachi_fixtures` ターゲット、`KATACHI_FIXTURE_DIR` の注入 |
+
+**削除**: なし
+
+### 生成するフィクスチャ
+
+| ファイル | 大きさ | 用途 |
+|---|---|---|
+| `gradient_rgb.png` | 347 B | ラウンドトリップ / PSNR / 決定性。アルファ無し |
+| `gradient_alpha.png` | 231 B | アルファ表。完全透明と完全不透明の画素を必ず含む |
+| `with_text.png` | 386 B | テキスト metadata の保持 |
+| `with_icc.png` | 664 B | ICC プロファイルの保持（DisplayP3） |
+| `oriented.tiff` | 12492 B | 向き metadata の保持（Rotate90） |
+| `not_an_image.bin` | 64 B | `ConvertError::DecodeFailed` |
+
+すべて 50KB 未満。乱数も時刻も使わない固定パターンで、同じ環境なら常に同じ内容になる。
+
+### 生成器が検出した Qt の挙動 2 件（T5 に直結する重要な知見）
+
+いずれも**推測ではなく、生成器の自己検証が失敗したことから切り分けて実測で確定させた。**
+
+#### 1. PNG のテキストは `QImageReader::text()` では読めない
+
+書き出しは `QImageWriter::setText()` でも `QImage::setText()` でも保持される。
+しかし読み取りでは `QImageReader::textKeys()` が**空**になり、
+`QImageReader::text()` も空文字を返す。
+**デコード後の `QImage::text()` からしか読めない。**
+
+```
+/tmp/u_writer.png -> QImage::text='katachi fixture'  QImage::textKeys=[Description]
+/tmp/u_image.png  -> QImage::text='katachi fixture'  QImage::textKeys=[Description]
+```
+
+**T5 でメタデータ保持を実装するとき、読み取りは `QImage::text()` / `QImage::textKeys()` を使う。**
+
+なお、テキスト付き PNG の読み込み時に libpng が標準エラーへ
+`libpng error: Read Error` を出す。`read()` は成功し内容も正しいため、無害な雑音として扱う。
+
+#### 2. JPEG に向き metadata は書けない。Qt がピクセルへ焼き込む
+
+当初 `oriented.jpeg` を作ろうとしたが、生成器の検証が
+「向き metadata が保持されていない」で落ちた。切り分けた結果。
+
+| 形式 | 書き出し | 読み戻しの transformation | 寸法（入力 16x8） |
+|---|---|---|---|
+| jpeg | 成功 | **None** | **8x16**（回転が焼き込まれた） |
+| tiff | 成功 | **Rotate90** | 16x8（維持） |
+
+JPEG のファイルに `Exif` マーカーは無かった。
+これは `QImageWriter::setTransformation()` の
+"If transformation metadata is not supported by the image format,
+the transform is applied before writing" に対応する挙動である。
+
+**フィクスチャを `oriented.tiff` に変更した。**
+
+**T5 と ADR-0003 への影響**: 「向きの保持」は形式によって手段が変わる。
+metadata として保持できる形式（TIFF 等）と、ピクセルへ焼き込まれる形式（JPEG）がある。
+どちらも視覚的な向きは保たれるが、**同じ「保持」ではない。**
+T5 で `MetadataPolicy::PreserveSupported` を実装する際に、この差を踏まえて
+ADR-0003 に追記する。
+
+### 追加・変更したテスト（7 本追加。42 → 49）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `every fixture stays under the 50KB limit` | 6 ファイルすべてが存在し、0 < size < 50KB | pass |
+| `gradient_rgb has no alpha channel` | `hasAlphaChannel()` が false | pass |
+| `gradient_alpha carries a fully transparent pixel` | アルファ有り、(0,0) の alpha が 0 | pass |
+| `with_text carries text metadata` | `QImage::text("Description") == "katachi fixture"` | pass |
+| `with_icc carries a colour space` | `colorSpace().isValid()` | pass |
+| `oriented carries orientation metadata` | `transformation() != TransformationNone` | pass |
+| `not_an_image cannot be decoded` | `QImage::fromData()` が null | pass |
+
+生成器もビルド時に同等の検証を行う。二重になるが、
+**生成器の検証はビルドを止め、テストは「テストから見て使える状態か」を確認する**もので、
+落ちたときの切り分けが変わる。T5 の変換テストが落ちたとき、
+それが `convert()` の不具合かフィクスチャの不備かを分けられるようにしている。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **49 / 49 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev` | exit 0 / 指摘 0 件 |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **49 / 49 pass** |
+
+`git ls-files` に画像バイナリが 1 つも無いことも確認した。
+
+### 推測で埋めた箇所
+
+**なし。** Qt の挙動 2 件はいずれも実測で確定させた。
+
+### 残課題 / 次にやること
+
+1. **T5（`ConversionSpec` と `convert()`）に着手する。Phase 1 の心臓部。**
+   上記の知見 2 件（テキストの読み取り経路、向きの形式差）を実装に反映する。
+2. `oriented.tiff` が 12.5KB とやや大きい。TIFF は非圧縮寄りのため。
+   50KB 制限内だが、他のフィクスチャ（1KB 未満）と比べて突出している。
+3. `isLossless` は白黒 2 値の探針で判定するため、色を表現できない形式も lossless と出る
+   （ADR-0007）。**T5 のラウンドトリップテストで形式を選ぶ際に注意する。**
+4. Windows の実機起動確認は Phase 0 から未了のまま。
