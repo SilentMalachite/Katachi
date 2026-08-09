@@ -1,0 +1,79 @@
+name: 機能の提案
+description: 新しい機能や、既存の設計の変更を提案する
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **実装してから提案しないでください。** 先に合意してから実装します
+        （[CONTRIBUTING.md](https://github.com/SilentMalachite/Katachi/blob/main/CONTRIBUTING.md) §5）。
+
+        既存の決定を変える提案は歓迎します。ただし ADR として記録する必要があります。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したい問題
+      description: >-
+        **機能ではなく問題から書いてください。** 「何ができないか」「何が不便か」です。
+      placeholder: |
+        大量のファイルを変換したあと、失敗した行だけを選んで再実行する手段がない。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案する内容
+      placeholder: |
+        結果一覧で失敗行だけを絞り込み、その行だけで再実行できるようにする。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: どの Phase に属すると思うか
+      description: docs/phases.md の分割です。分からなければ「分からない」を選んでください。
+      options:
+        - Phase 2（GUI）の改善
+        - Phase 3（拡張コーデック：HEIF / AVIF / JPEG XL / RAW / PSD）
+        - Phase 4（配布：署名・公証・インストーラ）
+        - どの Phase にも属さない新しいもの
+        - 分からない
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: 既存の制約との関係
+      description: >-
+        当てはまるものにチェックしてください。**チェックが付く提案は、
+        先に ADR で合意する必要があります。**
+      options:
+        - label: アプリ実行時のネットワーク通信が必要になる（**絶対禁止のため、まず採用されません**）
+        - label: 新しい依存ライブラリが必要になる
+        - label: GPL と両立しないライセンスのコードが関わる
+        - label: 既存の ADR（docs/adr/）の決定を変える必要がある
+        - label: UI にアニメーション / 自動スクロール / 独自テーマが必要になる（**docs/spec-core.md §7 で禁止**）
+        - label: 対応フォーマットをハードコードする必要がある（**能力表の方針に反する**）
+        - label: いずれにも当てはまらない
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 検討した代替案
+      description: >-
+        他の解き方を考えたなら書いてください。**採らなかった理由**もあると助かります。
+
+  - type: textarea
+    id: testability
+    attributes:
+      label: どう検証できると思うか
+      description: >-
+        このプロジェクトは TDD で進めます。**自動テストで確かめられるか**、
+        それとも実機操作が必要かを書いてください。
+      placeholder: |
+        失敗行の絞り込みは JobTableModel の単体テストで確かめられる。
+        再実行後の一覧の状態も同様。実機操作は要らないはず。

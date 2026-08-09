@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 脆弱性の報告（非公開）
+    url: https://github.com/SilentMalachite/Katachi/security/advisories/new
+    about: 公開の Issue に書かないでください。Private vulnerability reporting を使ってください。
+  - name: 行動規範に関する報告
+    url: https://github.com/SilentMalachite/Katachi/blob/main/CODE_OF_CONDUCT.md
+    about: 報告先は CODE_OF_CONDUCT.md に書いてあります。公開の Issue に書かないでください。

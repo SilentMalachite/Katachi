@@ -1,0 +1,109 @@
+name: バグ報告
+description: 期待した動作と違う挙動を報告する
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **脆弱性はここに書かないでください。**
+        [SECURITY.md](https://github.com/SilentMalachite/Katachi/blob/main/SECURITY.md) の手順に従ってください。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 何が起きたか
+      description: 期待した動作と、実際に起きたことを分けて書いてください。
+      placeholder: |
+        期待: PNG を JPEG に変換すると出力先に .jpg が作られる
+        実際: 結果一覧に「書き込み失敗」と出て、出力先に何も作られない
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 手順を番号付きで書いてください。**毎回起きるかどうかも書いてください。**
+      placeholder: |
+        1. フォルダを D&D する
+        2. 出力形式に JPEG を選ぶ
+        3. 開始を押す
+        4. 3 回試して 3 回とも同じ結果になる
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS とアーキテクチャ
+      placeholder: macOS 14.5 / arm64、または Windows 11 23H2 / x64
+    validations:
+      required: true
+
+  - type: input
+    id: qt-version
+    attributes:
+      label: Qt のバージョン
+      description: >-
+        必須です。Qt のバージョン差でしか起きない問題が実際にあります
+        （CI は 6.8 系 LTS に固定しています）。
+      placeholder: 6.8.3
+    validations:
+      required: true
+
+  - type: input
+    id: qtimageformats
+    attributes:
+      label: qtimageformats を入れているか
+      description: >-
+        既定では入りません。入れていないと TIFF / WebP などが能力表から丸ごと消えます。
+      placeholder: 入れている / 入れていない / 分からない
+    validations:
+      required: true
+
+  - type: input
+    id: formats
+    attributes:
+      label: 入力フォーマットと出力フォーマット
+      description: 拡張子ではなく、実際に選んだ形式を書いてください。
+      placeholder: 入力 TIFF（.tif）→ 出力 WebP（.webp）
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: コミットハッシュ
+      description: 未リリースのため、ビルドした時点のコミットを書いてください。
+      placeholder: c67c36a
+    validations:
+      required: true
+
+  - type: textarea
+    id: settings
+    attributes:
+      label: 変換設定
+      description: 既定から変えた項目を書いてください。
+      placeholder: |
+        品質: 85
+        アルファ: 白で合成
+        メタデータ: 保持
+        衝突ポリシー: Rename
+        リサイズ: 1920x1080
+
+  - type: textarea
+    id: build-log
+    attributes:
+      label: ビルド / テストの結果
+      description: >-
+        ビルドやテストが落ちる場合は、その出力を貼ってください。
+        `ctest --preset dev --output-on-failure` の結果があると助かります。
+      render: shell
+
+  - type: textarea
+    id: input-file
+    attributes:
+      label: 入力ファイルについて
+      description: >-
+        再現に使ったファイルの性質（サイズ / 画素数 / アルファの有無 / ICC の有無など）を
+        書いてください。**機微な画像は添付しないでください。**

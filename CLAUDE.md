@@ -9,7 +9,7 @@ Qt6 / C++20 のクロスプラットフォーム画像フォーマット変換�
 | フレームワーク | Qt 6.8 LTS 以上、**Qt Widgets**（Qt Quick 不採用） |
 | ビルド / テスト | CMake 3.24 以上 + `CMakePresets.json` / Catch2 v3 + CTest |
 | 対象 OS | macOS 13 以上（universal）、Windows 10 以上（x64） |
-| ライセンス | 本体 Apache-2.0。Qt は LGPLv3 のため **動的リンクのみ** |
+| ライセンス | 本体 **GPLv3-or-later**（ADR-0012。2026-08-09 に Apache-2.0 から変更）。Qt は LGPLv3 のため **動的リンクのみ** |
 
 ---
 
