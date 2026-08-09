@@ -1103,3 +1103,133 @@ BMP が ICC を保持できないことも、自分で実測して確定させ�
 2. その後 T7（`docs/format-matrix.md` のビルド時自動生成）で Phase 1 完了。
 3. 上記「対応していないこと」1〜3 は Phase 2 以降の検討事項として残る。
 4. Windows の実機起動確認は Phase 0 から未了のまま。
+
+---
+
+## 2026-08-09 — T6 完了（`NamingRule`）
+
+### 実施内容
+
+出力ファイル名の生成を実装した。ADR-0005 のとおり**名前を組み立てるだけで衝突の解決はしない。**
+
+### 計画時に書いた期待値の訂正
+
+T0 の計画で命名規則のテスト期待値を
+`resolveOutputName("photo", 1, "{name}_{index:03}", "png")` → `"photo_001.png"`
+と書いたが、**`docs/spec-core.md` §5 の例は `"{name}_{index:03}.{ext}"` であり、
+パターン自体に `.{ext}` を含む。** 仕様の例を正とし、テストもそちらで書いた。
+
+### 停止して判断を仰いだ事項 2 件
+
+#### 1. INV3A（core の文字列リテラル全面禁止）が正当な実装を阻んだ
+
+`NamingRule.cpp` の予約語 `{name}` / `{ext}` / `{index}` を検出して落ちた。
+
+```
+core/NamingRule.cpp:83: core 層の文字列リテラル（FormatId.hpp 以外では全面禁止）
+  > if (key == QStringView(u"name")) {
+```
+
+**全面禁止は私が T2 で足した強化だった。** `docs/spec-core.md` §3 の原文は
+「**フォーマット名の**文字列リテラルを書かない」であり、そこに全面禁止は無い。
+`QChar` を並べてスキャナを回避する実装は書かなかった（clang-tidy のときと同じ理由）。
+
+**判断（利用者回答）: 仕様どおり名前一覧判定に戻す。**
+INV3A を INV3B と同じ「フォーマット名の一覧との照合」に統一した。
+`docs/spec-core.md` §3 にも、禁止対象がフォーマット名であることを明記した。
+
+戻したあと 3 方向で確認した。
+
+| 確認 | 結果 |
+|---|---|
+| `src/core` の予約語リテラル（フォーマット名でない） | **通る**（意図どおり） |
+| `Result.hpp` に `"png"` を入れる | **検出**（`core/Result.hpp:50`） |
+| 違反フィクスチャ | **検出**（`core/StringLiteral.hpp:7`） |
+
+`FormatId.hpp` の除外は維持されている。
+
+#### 2. `bugprone-easily-swappable-parameters` が仕様のシグネチャを指摘
+
+`resolveOutputName(..., const QString& pattern, const QString& extension)` の
+隣接した同型 2 引数を指摘された。**指摘自体は妥当**（呼び出し側が取り違えうる）。
+
+**判断（利用者回答）: 強い型を導入し仕様を更新する。**
+
+```cpp
+struct NamePattern   { QString v; };
+struct NameExtension { QString v; };
+```
+
+`FormatId` と同じ「強い型付き文字列」の考え方（`spec-core.md` §2.1）で一貫させた。
+**リンタを黙らせるためではなく、取り違えを型で塞ぐという既存方針の適用である。**
+`docs/spec-core.md` §5 を更新した。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/core/NamingRule.hpp` | `NamingError` / `NamePattern` / `NameExtension` / `resolveOutputName()` |
+| `src/core/NamingRule.cpp` | 実装 |
+| `tests/core/naming_rule_test.cpp` | 実行時テスト 15 本 + `static_assert` 1 本 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `tests/invariants/scan_invariants.cmake` | INV3A を名前一覧判定へ統一（INV3B と同じ経路） |
+| `tests/invariants/fixtures/violations/inv3a/core/StringLiteral.hpp` | フォーマット名を含む違反に差し替え |
+| `docs/spec-core.md` §3 / §5 | 禁止対象の明確化、強い型の導入 |
+| `src/core/CMakeLists.txt` / `tests/CMakeLists.txt` | 新規ファイルの登録 |
+
+**削除**: なし
+
+### clang-tidy の指摘 8 件と対処
+
+core に新しい `.cpp` が入ったため、まとめて指摘が出た。すべてコード側で解消した。
+
+| 指摘 | 対処 |
+|---|---|
+| `misc-include-cleaner`（`cstdint` 不要 / `qint64` / `qsizetype`） | include を整理し `<QtTypes>` を追加 |
+| `readability-math-missing-parentheses` | `(width * decimalBase) + ...` と明示 |
+| `readability-magic-numbers`（10） | `decimalBase` 定数へ |
+| `readability-function-cognitive-complexity`（30 > 25） | プレースホルダ展開を `expandPlaceholder()` へ切り出し |
+| `bugprone-easily-swappable-parameters`（`padIndex`） | 桁数を `IndexWidth` 型で包む |
+| `bugprone-easily-swappable-parameters`（`resolveOutputName`） | 上記の判断 2 のとおり強い型を導入 |
+
+**認知的複雑度の指摘は正当だった。** 切り出しで実際に読みやすくなった。
+
+### 追加・変更したテスト（15 本追加。73 → 88）
+
+| 種別 | 内容 |
+|---|---|
+| 正常系 | 仕様の例そのもの / 桁指定なし / 0 詰め / 桁より長い数は切り詰めない / 負数の符号 / 前後の literal / 同じ名前の複数回 / 決定性 |
+| エラー | **`NamingError` の全 4 列挙値**（`EmptyPattern` / `UnknownPlaceholder` / `InvalidIndexSpec` / `EmptyResult`） |
+| 境界 | 閉じ括弧なし / 桁指定が数字でない 4 パターン / 桁指定が過大（上限 32） / 桁指定を取らない `{name:03}` |
+
+`{index}` の桁指定に上限（32）を設けたのは、上限が無いと巨大な指定で確保が走り
+`std::terminate` しうるため（ADR-0002）。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **88 / 88 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev` | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **88 / 88 pass** |
+
+### 推測で埋めた箇所
+
+**なし。** 判断が必要な 2 件はいずれも停止して指示を仰いだ。
+
+### 残課題 / 次にやること
+
+1. **T7（`docs/format-matrix.md` のビルド時自動生成）で Phase 1 完了。**
+2. INV3A を名前一覧判定に戻したため、**core にフォーマット名以外の文字列リテラルが
+   書けるようになった。** 表示用の文言を core に書いてしまう余地が生まれたが、
+   それは `CLAUDE.md` の「core に UI 文言を置かない」という設計方針で担保する（機械検査は無い）。
+3. Windows の実機起動確認は Phase 0 から未了のまま。

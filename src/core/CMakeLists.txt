@@ -11,6 +11,8 @@ add_library(
     ConversionSpec.hpp
     Converter.cpp
     Converter.hpp
+    NamingRule.cpp
+    NamingRule.hpp
     Concepts.hpp
     ConvertError.hpp
     FormatId.hpp

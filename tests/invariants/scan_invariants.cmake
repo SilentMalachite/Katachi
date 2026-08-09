@@ -11,8 +11,13 @@
 # CHECK の一覧:
 #   INV1  std::enable_if / std::void_t / SFINAE の痕跡
 #   INV2  無制約テンプレート（concept 定義・requires 節付きを除く）
-#   INV3A <ROOT>/core の文字列リテラル（FormatId.hpp を除き全面禁止）
+#   INV3A <ROOT>/core の文字列リテラル中のフォーマット名（FormatId.hpp を除く）
 #   INV3B <ROOT>/app の文字列リテラル中のフォーマット名
+#
+# INV3A は当初 core の文字列リテラルを全面禁止していたが、
+# docs/spec-core.md §3 の原文は「フォーマット名の文字列リテラルを書かない」であり、
+# 全面禁止はそこに無い強化だった。NamingRule の予約語（{name} / {ext} / {index}）という
+# フォーマット名でないリテラルを阻んだため、承認を得て仕様どおりの判定へ戻した。
 #   INV4  <ROOT>/core からの io/ ・ QtWidgets の include
 #   INV5  QtNetwork / QNetwork* の include
 #   INV6  NOLINT / 警告抑制プラグマ
@@ -137,12 +142,7 @@ foreach(file IN LISTS files)
                 endif()
             endif()
 
-        elseif(KATACHI_SCAN_CHECK STREQUAL "INV3A")
-            if(NOT line MATCHES "^[ \t]*#[ \t]*include" AND line MATCHES "\"")
-                set(hit "core 層の文字列リテラル（FormatId.hpp 以外では全面禁止）")
-            endif()
-
-        elseif(KATACHI_SCAN_CHECK STREQUAL "INV3B")
+        elseif(KATACHI_SCAN_CHECK STREQUAL "INV3A" OR KATACHI_SCAN_CHECK STREQUAL "INV3B")
             string(REGEX MATCHALL "\"[^\"]*\"" literals "${line}")
             foreach(literal IN LISTS literals)
                 string(TOLOWER "${literal}" literal_lower)

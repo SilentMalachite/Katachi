@@ -178,6 +178,9 @@ static_assert(CapabilitySource<CapabilityTable>);   // 契約の明文化
 
 - `src/core/` `src/app/` にフォーマット名の文字列リテラルを書かない。すべて `CapabilityTable` 経由
 - **唯一の例外は `src/core/FormatId.hpp` 内の変換関数**（`QString` ⇄ `FormatId`）とテストコード。スキャナはこの 2 箇所だけを除外する
+- **禁止しているのは「フォーマット名の」文字列リテラルであって、文字列リテラル一般ではない。**
+  `src/core/NamingRule.cpp` の `{name}` / `{index}` / `{ext}` のような、フォーマット名でない
+  予約語のリテラルは許される（不変条件スキャナ INV3A / INV3B はフォーマット名の一覧と照合する）
 - CI にハードコードスキャナのテストを置く
 
 ---
@@ -208,10 +211,17 @@ enum class NamingError {
     EmptyResult,         // 展開結果が空になった
 };
 
-// 例: "{name}_{index:03}.{ext}" → "photo_001.png"
+// 書式と拡張子は強い型で分ける。どちらも中身は QString なので、素の引数で並べると
+// 呼び出し側が取り違えられる。FormatId と同じ「強い型付き文字列」の考え方（§2.1）で塞ぐ。
+struct NamePattern   { QString v; };
+struct NameExtension { QString v; };
+
+// 差し込める名前は {name} / {index} / {ext} の 3 つ。
+// {index} は :N を付けて最小桁数を指定できる（0 詰め、上限 32）。
+// 例: resolveOutputName("photo", 1, {"{name}_{index:03}.{ext}"}, {"png"}) → "photo_001.png"
 [[nodiscard]] Result<QString, NamingError>
 resolveOutputName(const QString& sourceBaseName, int index,
-                  const QString& pattern, const QString& extension) noexcept;
+                  const NamePattern& pattern, const NameExtension& extension) noexcept;
 ```
 
 衝突ポリシー: `Overwrite` / `Skip` / `Rename`（`_1`, `_2` を付与）。
