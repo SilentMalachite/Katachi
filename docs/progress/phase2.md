@@ -1808,3 +1808,89 @@ io が Widgets を引いていなくてもテストバイナリ経由で見え�
    push の時期について判断を仰ぎたい。
 3. `.serena/` は未追跡のまま。
 4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
+
+---
+
+## 2026-08-09 — `phase2` を push。**未確認だった 2 点が CI で確認できた**
+
+### 実施内容
+
+T0 から「未確認」として持ち越していた 2 点を確かめるため `phase2` を push した。
+**初回 CI で 4 ジョブすべて success。** Phase 1 の初回 CI が 4 ジョブ全滅だったことを踏まえ、
+T7 の時点で早めに確認した。
+
+| 項目 | 内容 |
+|---|---|
+| run | [31297752976](https://github.com/SilentMalachite/Katachi/actions/runs/31297752976) |
+| 差分 | 11 コミット（T0〜T7 + ADR 追補 + フィクスチャ検査） |
+| 結果 | **4 ジョブすべて success** |
+
+### 未確認だった 2 点の結果
+
+| # | 事項 | 結果 | 根拠 |
+|---|---|---|---|
+| 1 | `Qt6::Concurrent` が CI の Qt 6.8.3 で入手できるか | **できる** | `find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent ...)` は **`REQUIRED`** であり、無ければ構成が落ちる。4 ジョブとも構成・ビルドが通った |
+| 2 | `QtConcurrent::mapped(QThreadPool*, ...)` が Qt 6.8 に実在するか | **する** | `JobRunnerBridge.cpp` が **macOS / Windows の両方**で Qt 6.8.3 に対してコンパイルされ、ブリッジのテストが両 OS で通った |
+
+**両 OS とも Qt 6.8.3**（`QT_ROOT_DIR` が `.../Qt/6.8.3/macos` と `...\Qt\6.8.3\msvc2022_64`）。
+ローカルは 6.11.1 なので、**6.8 での可用性はここで初めて確認できた。**
+
+### CI の結果
+
+| ジョブ | 結果 | テスト |
+|---|---|---|
+| ビルド + テスト (macOS 14 arm64、Qt 6.8.3) | **success** | **142 / 142 pass**（10.94 秒） |
+| ビルド + テスト (Windows 2022 MSVC、Qt 6.8.3) | **success** | **142 / 142 pass**（10.12 秒） |
+| clang-format + clang-tidy (macOS、LLVM 22.1.8) | **success** | — |
+| ASan + UBSan (macOS) | **success** | **142 / 142 pass**（19.31 秒） |
+
+**CI ログ全 3281 行に `warning:` / `error:` を含む行は 0 件。**
+
+### Windows で通ったことの確認（環境差が出やすい箇所）
+
+Phase 1 では環境差が「ローカル green / CI だけ失敗」という形で出た。
+今回**新しく入った並列実行と app 層**が Windows でも通ったことを個別に確認した。
+
+```
+Windows:
+  Test #118: the bridge can start a second batch after a cancel ... Passed
+  Test #120: the bridge throttles progress to 200ms ............... Passed
+  Test #123: the conversion runs off the main thread .............. Passed
+  Test #136: a skipped job is shown as skipped not failed ......... Passed
+  Test #139: the model exposes one row per job .................... Passed
+  Test #140: the model never reorders rows ........................ Passed
+```
+
+**懸念していたが問題にならなかったこと。**
+
+| 懸念 | 結果 |
+|---|---|
+| `QThread::idealThreadCount()` の差で並列度が変わり、キャンセルや進捗のテストが落ちる | **落ちなかった。** 両 OS とも 142 / 142 |
+| `QSaveFile` の改名が Windows で別挙動になる | **ならなかった** |
+| `QApplication` を使う `katachi_app_tests` が CI で起動しない | **起動した**（`QT_QPA_PLATFORM=offscreen` が効いている） |
+| 200ms タイマの粒度が Windows で粗く、進捗のテストが落ちる | **落ちなかった** |
+
+### 変更ファイル
+
+**変更**: `docs/progress/phase2.md`（本エントリ）。**コードは変更していない。**
+
+### 品質ゲートの実行結果
+
+**ローカルでは未実行**（コードを変更していないため）。
+直前の T7 で 6 本すべて exit 0（142 / 142）を確認済みで、その状態を push した。
+**CI が同じ内容に対して 4 ジョブ success を返している。**
+
+### 推測で埋めた箇所
+
+**なし。** 2 点はいずれも CI の実行結果で確定させた。
+
+### 残課題 / 次にやること
+
+1. **T8（`SettingsPanel`）に着手する。**
+   **出力の拡張子が `.jpeg` になる件（T4 で報告）はこのタスクの範囲。判断を仰ぐ。**
+2. **`.github/workflows/ci.yml` のステップ名が古い。**
+   「テスト（不変条件スキャナ 14 本 + smoke 2 本）」のままだが、実際は 142 本ある。
+   **本タスクの範囲外なので直していない。** 直すかどうか指示を仰ぐ。
+3. `.serena/` は未追跡のまま。
+4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了
+   （**CI では通っているが実機未確認**）。
