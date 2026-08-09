@@ -1355,3 +1355,104 @@ T3 のテストと同じ手口。**仕様に無い API を足さずに済ませ�
 3. Windows の実機起動確認は Phase 0 から未了のまま。
 4. Phase 2 着手時の宿題: `docs/phases.md` §5.3（バッチ実行時のメモリ上限）、
    衝突ポリシーの io 層での実装、ICO の内部キー `_q_icoOrigDepth` の扱い。
+
+---
+
+## 2026-08-09 — `phase1` を push。CI が環境差を検出し、修正して green
+
+### 実施内容
+
+`phase1` を push した（10 コミット / 37 ファイル / +4599 行）。
+**初回 CI は 4 ジョブすべて失敗した。** 原因を特定して修正し、再実行で全 green になった。
+
+### 初回 CI の失敗（run 31288967302）と原因
+
+4 ジョブとも**同一の原因**だった。
+
+```
+書き出しに失敗: .../oriented.tiff (Unsupported image format)
+FAILED: tests/fixtures/gradient_rgb.png
+```
+
+**フィクスチャ生成器が TIFF を書けず、設計どおりビルドを止めた。**
+T4 で「意図した性質が保たれなければ非ゼロ終了する」を入れた狙いが働いた。
+黙って壊れたフィクスチャを置いていたら、T5 の変換テストが
+「convert() の不具合」に見える形で落ちていた。
+
+### 根本原因（推測ではなく確認した）
+
+ローカルの `~/Qt/components.xml` に `qt.qt6.6111.addons.qtimageformats` が
+インストール済みとして記録されていた。**`qtimageformats` は Qt の別アドオンモジュールで、
+`install-qt-action` は既定でインストールしない。**
+
+| モジュール | プラグイン（macOS 実測） |
+|---|---|
+| `qtbase` | png（組込）/ `qjpeg` / `qgif` / `qico` / `qpdf` / `qsvg` |
+| **`qtimageformats`（アドオン）** | **`qtiff` / `qwebp` / `qjp2` / `qicns` / `qtga` / `qwbmp` / `qmacheif`** |
+
+ローカルは公式インストーラの全部入りで `qtimageformats` を含むため、差が出ていた。
+PNG / JPEG / BMP / GIF / ICO が CI でも動いていたのは、それらが `qtbase` 由来だから。
+
+**`docs/phases.md` §1.5 は「CI は `aqtinstall`」としか書いておらず、
+モジュールの指定が無かった。** ここが穴だった。
+
+### 修正
+
+`.github/workflows/ci.yml` の Qt 導入ステップ 3 箇所すべてに
+`modules: qtimageformats` を追加した。
+
+**`docs/licenses.md` §4 にモジュール別の内訳を追記した。**
+Phase 4 で `qtimageformats` を同梱するなら、その中の第三者ライブラリ
+（libtiff / libwebp 等）のライセンス文も `third_party_licenses.txt` に
+含める必要がある。**配布物の構成に影響する事項なので記録した。**
+
+### 修正後の CI（run 31289109546 / `1af5e0d`）
+
+| ジョブ | 結果 |
+|---|---|
+| ビルド + テスト (macOS 14 arm64、**Qt 6.8.3**) | **success / 93 / 93 pass** |
+| ビルド + テスト (Windows 2022 MSVC、**Qt 6.8.3 msvc2022_64**) | **success / 93 / 93 pass** |
+| clang-format + clang-tidy (macOS、22.1.8) | **success** |
+| ASan + UBSan (macOS) | **success / 93 / 93 pass** |
+
+CI ログ全 3574 行に `warning:` / `error:` を含む行は **0 件**。
+
+**Windows でもフィクスチャ生成の検証がすべて通った。**
+
+```
+  oriented.tiff  12492 bytes
+  indexed.png  203 bytes
+検証:
+  gradient_alpha.png: アルファあり
+  gradient_rgb.png: アルファなし
+  with_text.png: テキスト metadata あり
+  with_icc.png: ICC プロファイルあり
+  oriented.tiff: 向き metadata あり
+```
+
+### 事前に懸念していたが、実際には問題にならなかったこと
+
+push 前に「Windows や Qt 6.8 で落ちうる」と挙げていた点の結果。
+
+| 懸念 | 結果 |
+|---|---|
+| T3 の能力表実測（アルファ / 可逆性の分類）が環境で変わる | **変わらなかった。** `png` / `jpeg` の分類テストは Windows でも通った |
+| T4 のフィクスチャ（向き metadata、ICC）が保持されない | **保持された**（`qtimageformats` 導入後） |
+| Qt 6.8 と 6.11 の API 差 | **出なかった。** Phase 0 の `QStringLiteral` の件を踏まえ、`QStringView(u"...")` を使っていたのが効いた可能性がある |
+| 決定性テスト | 同一環境内の 2 回比較なので影響なし。両 OS で通った |
+
+**環境依存の実測（ADR-0007 の往復判定）が、異なる OS・異なる Qt バージョンで
+同じ結論を出したことが確認できた。**
+
+### 推測で埋めた箇所
+
+**なし。** モジュール構成はローカルのインストール記録で確認した。
+
+### 残課題 / 次にやること
+
+1. **PR を作成して `main` へマージする。** 未実施。
+2. **`docs/phases.md` §1.5 に CI のモジュール指定を追記するか**は未対応。
+   現状 `ci.yml` にコメントで根拠を書いてあるが、指示書側には無い。
+3. Windows の実機起動確認は Phase 0 から未了のまま。
+4. Phase 2 着手時の宿題: `docs/phases.md` §5.3（バッチ実行時のメモリ上限）、
+   衝突ポリシーの io 層での実装、ICO の内部キー `_q_icoOrigDepth` の扱い。
