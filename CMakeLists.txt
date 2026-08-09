@@ -57,6 +57,7 @@ endif()
 enable_testing()
 
 include(cmake/QualityGates.cmake)
+include(cmake/UiRequirements.cmake)
 
 add_subdirectory(src/core)
 add_subdirectory(src/io)

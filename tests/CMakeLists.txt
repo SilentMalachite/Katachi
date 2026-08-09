@@ -42,7 +42,8 @@ add_executable(katachi_tests main.cpp core/qt_image_plugins_smoke.cpp core/resul
                             io/collision_policy_test.cpp
                             io/job_runner_test.cpp
                             io/memory_budget_test.cpp
-                            io/job_runner_bridge_test.cpp)
+                            io/job_runner_bridge_test.cpp
+                            io/large_batch_test.cpp)
 
 add_dependencies(katachi_tests katachi_fixtures)
 
@@ -71,7 +72,8 @@ catch_discover_tests(katachi_tests)
 # katachi_app は Qt6::Widgets と katachi_io を伝播するため、ここでは重ねて書かない
 # （同じアーカイブが 2 回並ぶと Apple ld が警告を出す。T1 の知見）。
 add_executable(katachi_app_tests app/main.cpp app/job_table_model_test.cpp
-                               app/settings_panel_test.cpp app/main_window_test.cpp)
+                               app/settings_panel_test.cpp app/main_window_test.cpp
+                               app/batch_responsiveness_test.cpp)
 
 target_link_libraries(katachi_app_tests PRIVATE Catch2::Catch2 katachi_app katachi_warnings
                                                 katachi_sanitizers)

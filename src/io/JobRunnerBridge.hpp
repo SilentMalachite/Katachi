@@ -82,6 +82,11 @@ public:
     // （docs/phases.md §4 Phase 2「ワーカースレッドから QWidget に触れていない」）。
     [[nodiscard]] QThread* lastWorkerThread() const noexcept;
 
+    // メモリ予算の到達点。**同時確保量が予算を超えないことを検証するために公開する**
+    // （ADR-0008 / T10 の受け入れ基準）。
+    [[nodiscard]] int peakBudgetUnits() const noexcept;
+    [[nodiscard]] int budgetTotalUnits() const noexcept;
+
     // `public slots:` と書かないのは clang-tidy の readability-redundant-access-specifiers
     // による（slots は public へ展開されるため、直前の public: と重複する）。
     // 接続は必ず関数ポインタ形式で行う規約のため（docs/cpp-conventions.md §1）、

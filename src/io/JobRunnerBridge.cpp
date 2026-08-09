@@ -85,6 +85,10 @@ QThread* JobRunnerBridge::lastWorkerThread() const noexcept {
     return lastWorkerThread_.load(std::memory_order_relaxed);
 }
 
+int JobRunnerBridge::peakBudgetUnits() const noexcept { return budget_.peakUnits(); }
+
+int JobRunnerBridge::budgetTotalUnits() const noexcept { return budget_.totalUnits(); }
+
 void JobRunnerBridge::start(const BatchRequest& request) {
     if (isRunning()) {
         // 二重起動しない。走っている間の再投入は無視する。
