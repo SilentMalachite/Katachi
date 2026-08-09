@@ -36,7 +36,14 @@ add_executable(katachi_tests main.cpp core/qt_image_plugins_smoke.cpp core/resul
                             core/fixtures_test.cpp
                             core/converter_test.cpp
                             core/naming_rule_test.cpp
-                            core/format_matrix_test.cpp)
+                            core/format_matrix_test.cpp
+                            io/io_concepts_test.cpp
+                            io/file_io_test.cpp
+                            io/collision_policy_test.cpp
+                            io/job_runner_test.cpp
+                            io/memory_budget_test.cpp
+                            io/job_runner_bridge_test.cpp
+                            io/large_batch_test.cpp)
 
 add_dependencies(katachi_tests katachi_fixtures)
 
@@ -44,15 +51,35 @@ target_compile_definitions(katachi_tests PRIVATE KATACHI_FIXTURE_DIR="${KATACHI_
 
 target_link_libraries(
     katachi_tests
+    # katachi_core は katachi_io が INTERFACE で伝播するため、ここには書かない。
+    # 両方書くと同じアーカイブがリンク行に 2 回並び、Apple ld が
+    #   ld: warning: ignoring duplicate libraries: 'src/core/libkatachi_core.a'
+    # を出す。-Werror はリンカに効かないため exit 0 のまま警告だけが残る。
+    # **警告を抑制せず、構成側で重複を無くした。**
     PRIVATE Catch2::Catch2
             Qt6::Gui
-            katachi_core
+            katachi_io
             katachi_warnings
             katachi_sanitizers)
 
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 catch_discover_tests(katachi_tests)
+
+# app 層のテストは QApplication が要るため実行ファイルを分ける。
+# katachi_tests（core と io）に Qt6::Widgets を持ち込まないための分割でもある。
+#
+# katachi_app は Qt6::Widgets と katachi_io を伝播するため、ここでは重ねて書かない
+# （同じアーカイブが 2 回並ぶと Apple ld が警告を出す。T1 の知見）。
+add_executable(katachi_app_tests app/main.cpp app/job_table_model_test.cpp
+                               app/settings_panel_test.cpp app/main_window_test.cpp
+                               app/batch_responsiveness_test.cpp)
+
+target_link_libraries(katachi_app_tests PRIVATE Catch2::Catch2 katachi_app katachi_warnings
+                                                katachi_sanitizers)
+
+# GUI を持たない環境でも走らせる（docs/phases.md §2.4 は CI について同じ指定をしている）。
+catch_discover_tests(katachi_app_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # Result<T,E> の T == E 排除はコンパイルエラーとして現れるため、実行時テストでは観測できない。
 # 「ビルドが失敗すること」を確認する（不変条件スキャナのネガティブテストと同じ考え方）。

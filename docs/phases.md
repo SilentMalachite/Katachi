@@ -112,10 +112,18 @@ cmake --preset asan && ctest --preset asan   # ASan + UBSan（macOS / Linux）
 **追加の除外（Phase 1 で承認）**: `bugprone-exception-escape`。
 **ADR-0002 と原理的に両立しないため。** ADR-0002 は「コア関数は `noexcept` を維持し、
 確保失敗時の `std::terminate` を意図的に受け入れる」と決めており、この検査は
-まさにその形を禁止する。**これ以上の除外を増やすときも、同じように根拠を ADR に書き、
+まさにその形を禁止する。
+
+**追加の除外（Phase 2 で承認）**: `cppcoreguidelines-owning-memory`。
+**`cpp-conventions.md` §1 と原理的に両立しないため。** §1 は「Qt の親付き `new` は
+`app/` 層のみ許可」と明示しているが、この検査は `new` の結果を非所有ポインタへ
+入れること自体を咎める。局所変数でも引数でも指摘され、回避するとクラス構造が歪む
+（**ADR-0011** に実測を記録）。
+
+**これ以上の除外を増やすときも、同じように根拠を ADR に書き、
 ここへ追記すること。黙って増やさない。**
 
-**不変条件スキャナ 6 種（`tests/` に置く。Phase 0 で実装する）**
+**不変条件スキャナ 7 種（`tests/` に置く。1〜6 は Phase 0、7 は Phase 2 で実装する）**
 
 CLAUDE.md の「絶対禁止」を機械化したもの。人手のレビューに頼らない。
 
@@ -125,6 +133,12 @@ CLAUDE.md の「絶対禁止」を機械化したもの。人手のレビュー�
 4. `src/core` が `src/io` / `QtWidgets` を include していない
 5. `src/` に `QtNetwork` / `QNetworkAccessManager` の include が無い
 6. `src/` に `NOLINT` / `#pragma GCC diagnostic` / `#pragma warning` が無い
+7. **`src/io` が `QtWidgets` / `QWidget` を include していない**（Phase 2 で追加）
+
+**7 は Phase 2 で承認を得て追加した。** io はワーカースレッドで動く層であり（ADR-0010）、
+`QWidget` に触れてはならない（§4 Phase 2 の「ワーカースレッドから `QWidget` に触れていない」）。
+**実体の担保は `katachi_io` が `Qt6::Widgets` をリンクしないことであり、7 はテキスト上の二重の網である。**
+これ以上スキャナを増やすときも、同じように根拠を ADR に書き、ここへ追記すること。
 
 **`.clang-format`**: LLVM ベース / `IndentWidth: 4` / `ColumnLimit: 100` / `PointerAlignment: Left`
 
@@ -197,6 +211,9 @@ CLAUDE.md の「絶対禁止」を機械化したもの。人手のレビュー�
 | メタデータ保持の実装手段 | **`MetadataPolicy::PreserveAll` を `PreserveSupported` に改名**し、向き / テキスト / ICC のみ保持する。EXIF 全体の保持は Phase 3 | Phase 1 着手時に Qt 6.8 の公式ドキュメントで確認したところ、EXIF 全体を読み書きする API が存在しなかった（**ADR-0003**） |
 | `convert()` の警告の返し方 | **成功値を `ConversionOutput` にし、`warnings` を載せる** | `spec-core.md` §4 が要求する警告の置き場所が `Result<QByteArray, ConvertError>` に無かった（**ADR-0004**） |
 | 衝突ポリシーの担当層 | **core は名前の生成のみ。衝突の解決は Phase 2 の `src/io`** | 衝突判定にファイルシステム参照が要り、core では禁止されているため（**ADR-0005**） |
+| バッチ実行時のメモリ上限 | **バイト予算セマフォ。総量 1 GiB を `src/io/MemoryBudget` が管理する** | `maxPixels` 既定を `ARGB32` で持つと 1 枚 1 GiB。並列度を掛けると理論ピークが 9 GiB を超える。予算の単位を「デコード済み最大画像 1 枚分」に据えた（**ADR-0008**） |
+| 衝突ポリシーの適用場所とスキップの表し方 | **`FileSink::write()` がワーカースレッドで適用する。スキップは `IoError::DestinationExists`** | 事前に main thread で 1000 回実在確認すると UI が止まる。`ByteSink` の戻り値型（`cpp-conventions.md` §2.2）を変えずに済む（**ADR-0009**） |
+| UI の構成と §7 の担保方法 | **縦 3 段の単一ウィンドウ。モーダルは「出力先の選択」と「上書き実行の確認」の 2 用途のみ** | §7 を人手の注意ではなく機械検査（`grep` テスト・タイマ間隔・`activeModalWidget`）で守る。`QFileDialog` の可否は §7 の字義と衝突するため判断を仰いだ（**ADR-0010**） |
 
 ### 5.2 未解決（Phase 1 着手時に決める）
 
@@ -207,4 +224,9 @@ Qt 6.8 の公式ドキュメントで実挙動を確認したうえで決定し�
 
 ### 5.3 Phase 2 着手時に決める
 
-1. **バッチ実行時のメモリ上限** — `convert()` が `QByteArray` を受ける以上、同時にメモリへ載るファイル数は並列度で決まる。1000 ファイルバッチでの上限設計を Phase 2 のスコープに含める。
+**該当なし。** かつてここにあった「バッチ実行時のメモリ上限」は、Phase 2 着手時に
+`src/core/Converter.cpp` の一時画像の生存範囲を実際に読んだうえで決定し、§5.1 へ移した（ADR-0008）。
+
+決定にあたって併せて確定させた 2 件（衝突ポリシーの適用場所 / UI の構成と §7 の担保方法）も §5.1 にある。
+
+新たに未解決事項が生じた場合はここに追記する。**推測で埋めず、決めた根拠を ADR に残すこと。**
