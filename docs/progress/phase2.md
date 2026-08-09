@@ -2482,3 +2482,144 @@ D&D についても「行が増えた」ことだけを記録し、フォルダ�
 3. **Windows での実機起動**（Phase 0 から未了）。
 4. Phase 2 の PR 作成。
 5. `.serena/` は未追跡のまま。
+
+---
+
+## 2026-08-09 — CI が Phase 0 の決定違反を検出した。修正して 4 ジョブ green
+
+### 実施内容
+
+T8 / T9 / T10 を push した。**T8 以降が CI に載るのはこれが初めて**である
+（直前の success は `485204a` で、T8 の 1 つ前）。**clang-tidy が 1 件の error を出し、
+それは Phase 0 で一度解決したはずの問題の再発だった。** 原因を特定して修正し、green を確認した。
+
+### CI が検出した失敗（run 31300320769、commit `f482628`）
+
+```
+src/app/MainWindow.cpp:69:27: error: no header providing "QStringLiteral"
+    is directly included [misc-include-cleaner,-warnings-as-errors]
+```
+
+**ローカルでは再現しなかった。** 同じコマンド・同じ clang-tidy 22.1.8 で exit 0 になる。
+
+### 根本原因（Qt のバージョン差。実測で確認）
+
+| Qt | `QStringLiteral` マクロの定義場所 | include-cleaner の判定 |
+|---|---|---|
+| **6.11.1**（ローカル） | `qstring.h`。`qstringliteral.h` は `// QStringLiteral moved to QtCore/QString` だけのスタブ | `<QString>` が `qstring.h` を `IWYU pragma: export` するため **通る** |
+| **6.8.3**（CI） | `qstringliteral.h` | `<QString>` からは間接 include のため **error** |
+
+clang-tidy の版はローカル・CI とも **22.1.8 で一致**しており、差は Qt だけだった。
+
+**この差はローカルでは原理的に検出できない。** Qt 6.11.1 を使う限り、
+修正前のコードですらゲート 4 は exit 0 になる。**CI だけが判定できる。**
+
+### これは新しい問題ではなく、Phase 0 の決定違反である
+
+`docs/progress/phase0.md:232-240` に**同一のエラーメッセージ**が記録されている
+（当時は `src/app/main.cpp:9:42`）。結論は
+`QStringLiteral("Katachi")` → `QString::fromUtf8("Katachi")` で、
+その理由は `src/app/main.cpp` のコメントとして今も残っている。
+さらに本ファイル 1717 行目でも「`QStringLiteral` は使わない（Phase 0 の知見）」と再掲していた。
+
+**T9（`dd34e7a`）の `MainWindow.cpp:69-71` が、この決定に反して `QStringLiteral` を
+3 箇所で再導入していた。** 文書に 2 度書いてあったにもかかわらず、
+ローカル Qt が 6.11.1 であるために検証をすり抜けた。
+
+CLAUDE.md 停止条件 6 に該当するため、**修正前に停止して報告し、承認を得てから実装した。**
+
+### 変更ファイル
+
+**変更**: `src/app/MainWindow.cpp`（+6 / -3）。`src/app/main.cpp` と同じ形に揃え、理由をコメントで残した。
+
+```cpp
+start_->setObjectName(QString::fromUtf8("startButton"));
+```
+
+**追加・削除**: なし。テストの追加も無い（後述の「提案」を参照）。
+
+### 修正が正しいことの根拠
+
+**同じ run の同じ環境（Qt 6.8.3）で、`src/app/main.cpp` の
+`QString::fromUtf8("Katachi")` が指摘 0 で通過している。**
+`QString::fromUtf8` は `QString` のメンバであり、`<QString>` が提供ヘッダになるため、
+6.8 と 6.11 の両方で安定する。
+
+### 品質ゲートの実行結果
+
+**ローカル（macOS 14 / arm64、Qt 6.11.1）**
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **166 / 166 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev`（12 ファイル） | 指摘 0 件（**ただし後述のとおり今回の修正の証明にはならない**） |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **166 / 166 pass** |
+
+**ゲート 4 はこの修正の証明にならない。** ローカル Qt 6.11.1 では修正前も exit 0 だったため、
+確認できたのは非退行だけである。
+
+**CI（run 31300759853、commit `1d41b44`）— 4 ジョブすべて success**
+
+| ジョブ | 結果 | 所要 |
+|---|---|---|
+| ビルド + テスト (macOS) | **success** / 166 / 166 pass | 1 分 33 秒 |
+| ビルド + テスト (Windows) | **success** / 166 / 166 pass | 2 分 58 秒 |
+| clang-format + clang-tidy (macOS) | **success** | 1 分 38 秒 |
+| ASan + UBSan (macOS) | **success** / 166 / 166 pass | 1 分 45 秒 |
+
+### T10 で懸念した「Windows で 1000 件が遅い可能性」の結果
+
+**杞憂だった。落ちも、極端な遅さも無い。**
+
+| テスト | macOS | Windows |
+|---|---|---|
+| `a batch of 1000 files completes without blocking the main thread` | 0.48 秒 | **8.14 秒** |
+| `the window stays responsive during a batch`（200 件） | — | 1.50 秒 |
+| ctest 全体 | 17.21 秒 | 21.59 秒 |
+
+Windows は 1000 件テストで約 17 倍遅いが、絶対値は 8 秒であり許容範囲にある。
+
+### 先行する run 31297928119 が `cancelled` だった件（失敗ではない）
+
+`.github/workflows/ci.yml:12-14` の `concurrency` / `cancel-in-progress: true` により、
+2 分後の push（`6826721`）が前の run を打ち切っていた。
+**4 ジョブとも `failure` のステップは 1 つも無く**、打ち切り時刻は 06:02:26〜06:02:36Z に集中する。
+対象コミット `76c5142` は後続の success した run に含まれるため、**未検証のコミットは無い。**
+
+### 過去の記録の訂正
+
+T9 / T10 の記録に「clang-tidy 対象 **13 ファイル**」と書いたが、
+`git ls-files 'src/*.cpp'` の実測は **12 ファイル**である（CI の `[1/12]`〜`[12/12]` とも一致）。
+**数え違いだった。** 既存の記述は書き換えず、ここに訂正として残す。
+
+### 提案（停止条件 9。実装していない。判断を仰ぐ）
+
+**`src/` 内の `QStringLiteral` を禁止する機械検査を、不変条件スキャナに追加したい。**
+
+この問題は Phase 0 と Phase 2 で **2 度**起きた。2 度とも文書には書いてあり、2 度とも守られなかった。
+**文書の記述は、ローカル環境が CI と違うときには機能しない。**
+`tests/invariants/scan_invariants.cmake` に違反フィクスチャ付きで足せば、
+ローカルの Qt 版に関係なく検出できる。
+
+なお `tests/` には `QStringLiteral` が多数あるが、CI の clang-tidy 対象は `src/*.cpp` のみで、
+コンパイルは間接 include で通るため実害は無い。**検査対象は `src/` に限る想定である。**
+
+利用者の判断は「今回は提案として記録のみ」であったため、実装していない。
+
+### 推測で埋めた箇所
+
+**なし。** Qt 6.11.1 側のヘッダ構成は実ファイルを読んで確認した。
+Qt 6.8.3 側は手元に無いため**推測していない**。判断の根拠は
+「同じ CI run で `main.cpp` の `QString::fromUtf8` が通っている」という実測に置いた。
+
+### 残課題 / 次にやること
+
+1. **キーボードのみで開始・キャンセルできるか**（利用者にお願いする）。
+   これが済むと `spec-core.md` §7 が 7 / 7 になる。
+2. **Windows での実機起動**（Phase 0 から未了）。CI では通っているが、実機は別である。
+3. Phase 2 の PR 作成。
+4. 上記「提案」の可否。
+5. `.serena/` は未追跡のまま。
