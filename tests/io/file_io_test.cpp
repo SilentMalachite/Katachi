@@ -5,6 +5,7 @@
 //
 // テスト名は ASCII に限る（Phase 0 の知見）。
 #include "core/Result.hpp"
+#include "io/CollisionPolicy.hpp"
 #include "io/FileSink.hpp"
 #include "io/FileSource.hpp"
 #include "io/IoError.hpp"
@@ -25,6 +26,8 @@ namespace {
 using katachi::io::FileSink;
 using katachi::io::FileSource;
 using katachi::io::IoError;
+using katachi::io::OutputDirectory;
+using katachi::io::OutputFileName;
 
 constexpr auto allEntries = QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden;
 
@@ -106,20 +109,20 @@ TEST_CASE("FileSink writes the exact bytes", "[io][file]") {
     const QString path = QDir(temp.path()).filePath(QStringLiteral("out.bin"));
     const QByteArray payload("katachi\x00 sink", 12);
 
-    FileSink sink(path);
+    FileSink sink(OutputDirectory{temp.path()}, OutputFileName{QStringLiteral("out.bin")});
     const auto result = sink.write(payload);
 
     REQUIRE(result.isOk());
+    REQUIRE(sink.resolvedPath() == path);
     REQUIRE(readRawFile(path) == payload);
 }
 
 TEST_CASE("FileSink reports WriteFailed for a missing directory", "[io][file]") {
     QTemporaryDir temp;
     REQUIRE(temp.isValid());
-    const QString path =
-        QDir(temp.path()).filePath(QStringLiteral("missing")) + QStringLiteral("/out.bin");
 
-    FileSink sink(path);
+    FileSink sink(OutputDirectory{QDir(temp.path()).filePath(QStringLiteral("missing"))},
+                  OutputFileName{QStringLiteral("out.bin")});
     const auto result = sink.write(QByteArray("x"));
 
     REQUIRE_FALSE(result.isOk());
@@ -130,10 +133,11 @@ TEST_CASE("FileSink leaves no partial file when it fails", "[io][file]") {
     QTemporaryDir temp;
     REQUIRE(temp.isValid());
     const QDir dir(temp.path());
-    const QString path = dir.filePath(QStringLiteral("missing")) + QStringLiteral("/out.bin");
+    const QString missingDir = dir.filePath(QStringLiteral("missing"));
+    const QString path = QDir(missingDir).filePath(QStringLiteral("out.bin"));
     const QStringList before = dir.entryList(allEntries);
 
-    FileSink sink(path);
+    FileSink sink(OutputDirectory{missingDir}, OutputFileName{QStringLiteral("out.bin")});
     const auto result = sink.write(QByteArray(1024, 'x'));
 
     REQUIRE_FALSE(result.isOk());

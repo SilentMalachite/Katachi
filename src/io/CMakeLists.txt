@@ -9,6 +9,8 @@
 # T2 で FileSource.cpp / FileSink.cpp が入ったため INTERFACE から STATIC へ変更した。
 add_library(
     katachi_io STATIC
+    CollisionPolicy.cpp
+    CollisionPolicy.hpp
     FileSink.cpp
     FileSink.hpp
     FileSource.cpp

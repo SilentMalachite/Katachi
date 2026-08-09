@@ -985,3 +985,137 @@ T1 で解消した重複リンクが `Qt6::Core` の明示リンク追加によ�
 2. `indexed.png` を `fixtures_test.cpp` の大きさ検査へ足すかどうかの判断（T1.5 で報告）。
 3. `.serena/` は未追跡のまま。
 4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
+
+---
+
+## 2026-08-09 — T3 完了（衝突ポリシー）。並列実行時の競合を 1 件発見（提案あり）
+
+### 実施内容
+
+ADR-0005 が Phase 2 へ送った宿題を果たした。`CollisionPolicy` を `src/io` に置き、
+`FileSink` が**書く直前に**適用するようにした（ADR-0009）。
+TDD の順序を守り、実装前に意図した理由での失敗
+（`'io/CollisionPolicy.hpp' file not found`）を確認した。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/io/CollisionPolicy.hpp/.cpp` | `CollisionPolicy`（既定 `Skip`）、`OutputDirectory` / `OutputFileName`、`resolveCollision()` |
+| `tests/io/collision_policy_test.cpp` | 実行時テスト 7 本 + `static_assert` 3 本 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `src/io/FileSink.hpp/.cpp` | 構築引数を「ディレクトリ + 名前 + ポリシー」へ。`resolvedPath()` を追加。`write()` の `const` を外した |
+| `src/io/CMakeLists.txt` | `CollisionPolicy.cpp/.hpp` を追加 |
+| `tests/io/file_io_test.cpp` | `FileSink` の新しい構築引数に追随（3 本） |
+| `tests/CMakeLists.txt` | `io/collision_policy_test.cpp` を追加 |
+
+**削除**: なし
+
+### 設計上の判断
+
+**`OutputDirectory` / `OutputFileName` の強い型を導入した。**
+`FileSink(QString directory, QString fileName, ...)` は同型の引数が隣接し、
+`bugprone-easily-swappable-parameters` に触れる。それ以上に、
+**取り違えると意図しない場所へファイルを書く。**
+Phase 1 の T6 で `NamePattern` / `NameExtension` を入れたのと同じ考え方
+（`docs/spec-core.md` §2.1 の「強い型付き文字列」）で型を分けた。
+**リンタを黙らせるためではなく、既存方針の適用である。**
+
+**`resolvedPath()` は `ByteSink` concept に含めない。** concept が要求する操作は
+原則 4 個以下（`docs/cpp-conventions.md` §2.6）であり、この値が要るのは
+具象型を知っている呼び出し側（T6 の `JobRunnerBridge`）だけのため。
+
+**`Rename` は拡張子を必ず維持する。** 末尾のドットで基底名と拡張子に分け、
+その間に `_N` を挟む（`photo.png` → `photo_1.png`）。拡張子を落とすと出力形式が分からなくなる。
+
+### 承認された計画からの変更（申告）
+
+**1. `resolveCollision()` に上限を引数で注入できるようにした。**
+計画のテストは「上限（10000）まで埋まっていれば `WriteFailed`」だったが、
+**10000 個のファイルを作るテストは CI で重く、特に Windows では数十秒かかりうる。**
+上限を引数（既定 `defaultMaxRenameAttempts` = 10000）にして、テストは上限 3 で同じ経路を通す。
+`FileSource` の `maxBytes` と同じ考え方であり、そちらは計画の時点で承認済み。
+**既定が 10000 であることは `static_assert` で固定した。**
+
+**2. `FileSink::write()` の `const` を外し、構築引数を変えた。**
+いずれも T2 の報告で「T3 で変わる」と予告したとおり。
+
+### 追加・変更したテスト（7 本追加。107 → 114）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `the default collision policy is Skip` | `defaultCollisionPolicy == Skip`（`Overwrite` でない）。ポリシーを省略した `FileSink` が既存ファイルを**上書きしない** | pass |
+| `no collision keeps the requested name` | 既存が無ければ要求どおりの名前。`resolvedPath()` が一致 | pass |
+| `Overwrite replaces the existing file` | 内容が置き換わり、**余計なファイルを作らない**（ディレクトリの項目数 1） | pass |
+| `Skip leaves the existing file untouched` | `IoError::DestinationExists`。既存の内容が**変わらず**、**別名でこっそり書いてもいない**（一覧が一致） | pass |
+| `Rename appends _1 when the name is taken` | `photo_1.png` に新しい内容。**`photo.png` は触らない。拡張子も落とさない** | pass |
+| `Rename continues to _2` | `photo.png` と `photo_1.png` があるとき `photo_2.png` | pass |
+| `Rename gives up after the limit` | 上限 3 で埋まっていれば `IoError::WriteFailed`。**無限ループしない** | pass |
+
+`static_assert`: `defaultCollisionPolicy == Skip` / `!= Overwrite` / `defaultMaxRenameAttempts == 10000`。
+
+**`IoError` の全 5 値にテストが揃った**（`NotFound` / `OpenFailed` / `WriteFailed` / `TooLarge` /
+`DestinationExists`）。`docs/phases.md` §2.2 のエラー種別テストを io 層でも満たした。
+
+### 提案: `Rename` は並列実行で競合する（停止条件 9。実装していない）
+
+**実装中に気づいた。T3 の時点では並列実行が無いため実害は無いが、
+T6 で `QtConcurrent` を入れた瞬間に実バグになる。**
+
+`resolveCollision()` が候補名を選んでから `QSaveFile::commit()` が完了するまでの間に、
+**別のワーカーが同じ候補名を選べる。**
+
+```
+worker A: photo_1.png は空き -> 選ぶ
+worker B: photo_1.png は空き -> 選ぶ    <- A はまだ commit していない
+worker A: commit
+worker B: commit                        <- A の出力を上書きする
+```
+
+`Skip` と `Overwrite` には起きない（`Skip` は書かない、`Overwrite` は上書きが仕様どおり）。
+**`Rename` だけが「衝突を避ける」という約束を破る。**
+
+対処案。
+
+| 案 | 内容 | 評価 |
+|---|---|---|
+| **A（推奨）** | `JobRunnerBridge` が持つミューテックスで**名前の予約だけ**を直列化する。変換本体は並列のまま | 実装が小さく、失敗時の後始末が不要。直列化されるのは実在確認の数マイクロ秒だけ |
+| B | `FileSink` が候補名を `QIODevice::NewOnly` で**原子的に予約**してから書く | OS 任せで直列化が不要。ただし書き出しに失敗したとき、予約した空ファイルの後始末が要る（「失敗しても部分ファイルを残さない」を自分で壊しかねない） |
+| C | バッチ開始時に出力名を全件配り、実在確認を 1 回で済ませる | 1000 件で main thread が固まる（ADR-0009 が避けた形そのもの） |
+
+**A を推奨する。T6 で実装してよいか判断を仰ぐ。**
+なお、外部のプロセスが同時に同じディレクトリへ書く場合の競合は、
+どの案でも完全には塞げない（ファイルシステム越しの排他が要る）。**そこまでは追わない。**
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **114 / 114 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev`（対象 8 ファイル） | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **114 / 114 pass** |
+
+clang-format は新規テストの 1 箇所で違反を出したため整形してから再実行した（対象は今回のファイルのみ）。
+
+### 推測で埋めた箇所
+
+**なし。** `QFileInfo::completeBaseName()` / `suffix()` の分割位置は、
+`photo_1.png` が実際に生成されることをテストで確認している。
+
+### 残課題 / 次にやること
+
+1. **上記「`Rename` の並列競合」への対処方針の判断。** T6 で塞ぐ前提で A を推奨。
+2. **T4（`JobRunner<Sink, Progress>`）に着手する。** ヘッダのみのテンプレート。
+   Qt のイベントループもファイルシステムも使わずにテストする。
+3. `indexed.png` を `fixtures_test.cpp` の大きさ検査へ足すかどうかの判断（T1.5 で報告）。
+4. `.serena/` は未追跡のまま。
+5. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
