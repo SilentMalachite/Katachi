@@ -12,21 +12,24 @@
 
 ## 状態
 
-**Phase 2（GUI）まで完了。** 手元で実用できる段階にある。
+**Phase 3（拡張コーデック）まで完了。** 手元で実用できる段階にある。
 
 | Phase | 内容 | 状態 |
 |---|---|---|
 | 0 | 基盤：CMake / プリセット / CI / 品質ゲート / 不変条件スキャナ | 完了 |
 | 1 | コア：`Result` / 能力表 / `convert()` / 命名規則 | 完了 |
 | 2 | GUI：D&D / ジョブ一覧 / 設定パネル / 進捗 / キャンセル / 結果表示 | **完了（下記 2 点を除く）** |
-| 3 | 拡張コーデック：HEIF / AVIF / JPEG XL / RAW / PSD | 未着手 |
+| 3 | 拡張コーデック：AVIF / JPEG XL / PSD / RAW（オプショナル依存） | **完了（macOS のみ。下記参照）** |
 | 4 | 配布：`macdeployqt` / `windeployqt` / 署名・公証 / インストーラ | 未着手 |
 
-### 未確認の項目（正直に記載する）
+### 未確認・未対応の項目（正直に記載する）
 
 - **キーボードのみでの開始・キャンセル** — タブ順の連結と到達可能性は自動テスト済みだが、
   マウス無しでの実操作は未確認
 - **Windows での実機起動** — CI では通っているが、実機での起動は未確認
+- **Windows での追加コーデック** — 未対応。`KATACHI_EXTRA_CODECS=ON` の CI ジョブは macOS のみ
+- **追加コーデック ON でのアプリ実機起動** — 未確認。ビルドとテストが通ることのみ確認済み
+- **HEIF** — 自前導入は対象外。macOS は `qmacheif`（Qt 同梱）で読み書き可、Windows は使えないまま
 
 **CI の成功や自動テストの結果を実機操作の根拠にはしない。**
 
@@ -49,6 +52,23 @@
 
 これらは `docs/spec-core.md` §7 の要件であり、うち 3 件（アニメーション / 独自テーマ /
 複数ウィンドウ）は**機械検査**で守っている。
+
+### 追加コーデック（オプション、既定 OFF）
+
+`KATACHI_EXTRA_CODECS=ON` でビルドすると、AVIF / JPEG XL / PSD / RAW（29 拡張子）が
+**`src/` の変更なしに**能力表・出力候補・変換対象へ加わる（対応形式 21 → 57）。
+書き出しも可能なのは AVIF と JPEG XL のみで、PSD / RAW は読み込み専用。
+
+- 既定は **OFF**。無い環境でも同じアプリがビルド・起動する
+- ON でビルドしても、アプリ本体は追加コーデックへ**リンクしない**（実行時ロードのプラグイン）
+- **現時点は macOS のみ CI 検証済み。** Windows は未対応
+- 詳細は [`docs/adr/0013-extra-codecs.md`](docs/adr/0013-extra-codecs.md)
+
+```bash
+brew install libavif jpeg-xl libraw pkgconf   # macOS
+cmake --preset dev-codecs
+cmake --build --preset dev-codecs
+```
 
 ---
 
@@ -152,8 +172,9 @@ cmake --preset asan && ctest --preset asan
 | [`docs/spec-core.md`](docs/spec-core.md) | 型・能力表・アルファ・命名・並行・UI 要件 |
 | [`docs/cpp-conventions.md`](docs/cpp-conventions.md) | C++20 規約と `concept` の方針 |
 | [`docs/phases.md`](docs/phases.md) | Phase 分割・受け入れ基準・品質ゲート |
+| [`docs/agent-protocol.md`](docs/agent-protocol.md) | 報告書式・サブエージェント・曖昧さの解決順序 |
 | [`docs/licenses.md`](docs/licenses.md) | 本体と依存物のライセンス条件 |
-| [`docs/adr/`](docs/adr/) | 設計判断の記録（ADR-0001〜0012） |
+| [`docs/adr/`](docs/adr/) | 設計判断の記録（ADR-0001〜0014） |
 | [`docs/progress/`](docs/progress/) | Phase ごとの実施記録（**追記のみ**） |
 
 ---
@@ -191,7 +212,9 @@ LGPLv3 §4 が求める「利用者がライブラリを差し替えて再リン
 Catch2 v3（Boost Software License 1.0）は**テストのみで使い、成果物には含まれない。**
 
 Qt 同梱の画像フォーマットプラグインは libjpeg-turbo / libtiff / libwebp などを内部に含む。
-配布時の第三者ライセンス文の同梱は Phase 4 で扱う（[`docs/licenses.md`](docs/licenses.md) §4）。
+追加コーデック（ON 時）は libavif / libjxl / LibRaw / kimageformats / ECM を使う。
+いずれも GPLv3 と両立することを確認済み（[`docs/licenses.md`](docs/licenses.md) §5.1）。
+配布時の第三者ライセンス文の同梱は Phase 4 で扱う（同 §4）。
 
 ---
 
