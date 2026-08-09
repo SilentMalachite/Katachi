@@ -1509,3 +1509,162 @@ MemoryBudget.hpp:25:43: error: performing an implicit widening conversion to typ
 2. 出力の拡張子が `.jpeg` になる件の判断（T4 で報告。T8 の範囲）。
 3. `.serena/` は未追跡のまま。
 4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
+
+---
+
+## 2026-08-09 — T6 完了（`JobRunnerBridge`）。並列実行・キャンセル・進捗の間引きが揃った
+
+### 実施内容
+
+バッチ実行の司令塔を実装した。Phase 2 で最も大きいタスク。
+`QtConcurrent::mapped` による並列実行、200ms の進捗間引き、キャンセルの二段構え、
+**ADR-0009 追補（案 A）の名前予約**を入れた。
+TDD の順序を守り、テストを先に書いてから実装した。
+
+### T0 で「未確認」とした 4 点の結果
+
+計画の時点で「推測で進めない」として保留した項目を実測した。
+
+| # | 事項 | 結果 |
+|---|---|---|
+| 1 | `Qt6::Concurrent` が入手できるか | **ローカルでは qtbase 同梱で `find_package` が通った。** CI（Qt 6.8.3 / `aqtinstall`）は**未確認**。push して確認する |
+| 2 | `QtConcurrent::mapped(QThreadPool*, ...)` が Qt 6.8 にあるか | **ローカル 6.11.1 では動作した。** 6.8 は**未確認**。CI で確認する |
+| 3 | キャンセル後に `finished` が来るか | **来る。** テスト `cancel stops the batch and the app returns to idle` が `finished` を待って通った。**これが来なければ UI が実行中のまま戻れなかった** |
+| 4 | 実行中の項目がキャンセルで中断されるか | 公式ドキュメントに記述が無い状態は変わらない。**「中断されない」前提の二段構えを維持した** |
+
+**1 と 2 はローカルの結果を CI の結果として報告しない。** Phase 1 の `qtimageformats` は
+まさにこの形（ローカル green / CI のみ失敗）で現れた。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/io/JobRunnerBridge.hpp/.cpp` | `BatchRequest` と `JobRunnerBridge`（QObject アダプタ） |
+| `tests/io/job_runner_bridge_test.cpp` | 実行時テスト 7 本 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `CMakeLists.txt` | `find_package` に `Concurrent` を追加 |
+| `src/io/CMakeLists.txt` | `AUTOMOC` を有効化、`JobRunnerBridge` を追加、`Qt6::Concurrent` / `Qt6::Gui` をリンク |
+| `src/io/CollisionPolicy.hpp/.cpp` | `resolveCollision()` に**予約済み集合**の引数を追加（ADR-0009 追補） |
+| `src/io/JobRunner.hpp` | `std::move` の除去（clang-tidy の指摘） |
+| `tests/io/collision_policy_test.cpp` | 引数追加への追随 |
+| `tests/CMakeLists.txt` | `io/job_runner_bridge_test.cpp` を追加 |
+
+**削除**: なし
+
+### 設計上の判断
+
+**ワーカーはシグナルを出さない。** `onProgress()` は atomic を更新するだけで、
+発火は main thread の `QTimer(200ms)` が行う。`docs/spec-core.md` §7 の
+「進捗表示は 200ms 以下の間隔で更新しない」を**構造的に**満たす。
+1000 件でシグナルが 1000 回飛ぶ設計を最初から採らない。
+
+**結果も同じタイマでまとめて出す。** `QFuture::resultCount()` / `resultAt()` から
+新しく揃った分だけ取り出して `resultsReady` を 1 回で送る。
+ワーカーが別の入れ物へ積む方式より経路が 1 本で済み、ロックも増えない。
+
+**`QtConcurrent::mapped` へは `std::move(items)` で渡す。**
+左辺値で渡すと `Sequence&&` が参照に束縛され、ローカルの `items` を指したまま
+ワーカーが走る（`start()` を抜けた瞬間に宙に浮く）。
+
+**デストラクタで `waitForFinished()` する。** ワーカーは `this` を触るため、
+終わってからでないと壊せない。
+
+**走っている間の再投入は無視する。** `start()` は `isRunning()` なら何もしない。
+
+**Sink のポリシーは `Overwrite`。** 名前は既に予約済みで、
+`FileSink` の中で再度衝突解決をする必要が無いため。
+
+### ADR-0009 追補（案 A）の実装
+
+`resolveCollision()` に「このバッチで予約済みの出力パス」の集合を渡せるようにし、
+**実在するものと同じに扱う。** `JobRunnerBridge::reservePath()` が
+`QMutex` の中で「解決 → 予約集合へ追加」までを行い、**書き出しはロックの外**で並列に走る。
+
+臨界区間はファイル数個分の実在確認だけ。変換も書き出しも並列のまま。
+
+**テストで固定した**（`parallel renames never collide`）。
+50 件すべてが同じ出力名 `out.png` を要求する状況で、
+**50 件が別々のファイルになる**ことを確認している。予約が無ければ、
+まだ commit されていない出力を実在確認では見つけられず、複数のワーカーが同じ名前を選ぶ。
+
+### clang-tidy の指摘 11 件と対処（すべてコード側。抑制ゼロ）
+
+`JobRunnerBridge.cpp` が入ったことで、ゲートの対象が 9 本 → **10 本**になり、
+`JobRunner.hpp` を含む io のヘッダ群へ初めて届いた。予告どおり指摘が出た。
+
+| 指摘 | 対処 |
+|---|---|
+| `performance-move-const-arg`（`JobFailure` は trivially copyable で `std::move` が無効） | `std::move` を外した |
+| `misc-include-cleaner` × 6（`QObject` / `Qt::CoarseTimer` / `std::memory_order_relaxed` / `QtConcurrent::mapped` / `core::NamingError` / `emit`） | 直接 include を追加 |
+| `misc-const-correctness`（`QImageReader reader`） | `const` を付けた |
+| `readability-redundant-casting`（`resultCount()` は既に `int`） | キャストを外した |
+| `readability-redundant-access-specifiers`（`public slots:` が直前の `public:` と重複） | **`slots` を書かない形にした。** 接続は関数ポインタ形式に限る規約（`cpp-conventions.md` §1）のため、moc へスロット登録する必要が無い |
+
+**`emit` の提供ヘッダで 2 回外した。** 最初 `<QObject>` で足りると考え、次に
+`<QtCore/qobjectdefs.h>` を入れたが、いずれも解消しなかった。
+`grep` で実際の定義位置を調べたところ **Qt 6 では `qtmetamacros.h`** だった。
+**推測で 2 回外し、実測で確定させた。**
+
+### 追加・変更したテスト（7 本追加。128 → 135）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `the bridge finishes a small batch` | 5 件すべて `Succeeded`、`finished` が **1 回だけ**、出力ファイルが 5 件 | pass |
+| `the bridge throttles progress to 200ms` | タイマ間隔が **200**。200 件でも進捗シグナルは **200 回未満** | pass |
+| `cancel stops the batch and the app returns to idle` | 300 件を開始直後にキャンセル → **出力が入力件数未満**、`finished` が届き `isRunning()` が false | pass |
+| `the bridge can start a second batch after a cancel` | キャンセル後に再投入して**全件成功**（状態が残っていない） | pass |
+| `failed jobs stay in the results with a reason` | 壊れた 1 件が `Failed` + `ConvertError::DecodeFailed` で**残り**、他 2 件は成功 | pass |
+| `the conversion runs off the main thread` | 変換したスレッドが main と**異なる**。UI へ届くシグナルは main から出る | pass |
+| `parallel renames never collide` | 50 件が同じ名前を要求しても**50 件別々のファイル**になる（ADR-0009 追補） | pass |
+
+### フレーキーでないことの確認
+
+並行と時間に依存するため、**ブリッジのテストだけを 5 回連続で実行した。** 5 回とも exit 0。
+ASan / UBSan 版でも 135 / 135 green。
+
+### 本番型の concept 適合（T1 の宿題を完了）
+
+`static_assert(ProgressSink<JobRunnerBridge>)` を `JobRunnerBridge.cpp` に置いた。
+**これで `ByteSource` / `ByteSink` / `ProgressSink` の 3 つとも本番型の `static_assert` が揃った**
+（`docs/phases.md` §2.2 の concept 適合テスト）。
+
+### 差分規模（停止条件 8。計画時に申告済み）
+
+**10 ファイル / +713 行 / -11 行。** 計画で「T6 は単独で 400 行を超える見込み」と
+申告したとおりになった。内訳は本体 371 行、テスト 304 行、CMake と既存の追随が残り。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **135 / 135 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev`（**対象 10 ファイル**） | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **135 / 135 pass** |
+
+### 推測で埋めた箇所
+
+**なし。** `emit` の提供ヘッダは 2 回外したうえで `grep` で確定させた。
+キャンセル後の `finished` はテストで実測した。
+**`Qt6::Concurrent` と `QThreadPool*` 版の Qt 6.8 での可用性は「未確認」のままであり、
+ローカルの結果を CI の結果として報告しない。**
+
+### 残課題 / 次にやること
+
+1. **T7（`JobTableModel`）に着手する。** ここで `tests/app/` と `katachi_app_tests`
+   （`QApplication` が要るため別実行ファイル）を新設する。
+2. **CI で未確認の 2 点を確認する。** `Qt6::Concurrent` の入手と
+   `QtConcurrent::mapped(QThreadPool*, ...)` の Qt 6.8 での実在。
+   **T7 以降のどこかで push して早めに確かめる方が安全**（Phase 1 は最後にまとめて
+   push して 4 ジョブ全滅した）。push の時期について判断を仰ぐ。
+3. 出力の拡張子が `.jpeg` になる件の判断（T4 で報告。T8 の範囲）。
+4. `.serena/` は未追跡のまま。
+5. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。

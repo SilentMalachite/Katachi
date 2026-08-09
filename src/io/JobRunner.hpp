@@ -146,9 +146,11 @@ public:
     }
 
 private:
+    // JobFailure は列挙 3 種の variant で trivially copyable。std::move しても効果が無く、
+    // clang-tidy の performance-move-const-arg が正しく指摘する。値で受けて代入する。
     [[nodiscard]] JobOutcome failed(JobOutcome& outcome, JobFailure failure) {
         outcome.status = JobStatus::Failed;
-        outcome.failure = std::move(failure);
+        outcome.failure = failure;
         reportProgress();
         return outcome;
     }

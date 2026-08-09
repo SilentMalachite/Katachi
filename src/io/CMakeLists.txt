@@ -7,6 +7,10 @@
 # （docs/phases.md §4 Phase 2 の受け入れ基準）。Phase 1 の katachi_core と同じ手口。
 #
 # T2 で FileSource.cpp / FileSink.cpp が入ったため INTERFACE から STATIC へ変更した。
+# JobRunnerBridge が Q_OBJECT を持つため moc が要る。
+# AUTOMOC はこのディレクトリにのみ効かせる（Catch2 へ波及させない）。
+set(CMAKE_AUTOMOC ON)
+
 add_library(
     katachi_io STATIC
     CollisionPolicy.cpp
@@ -18,6 +22,8 @@ add_library(
     IoConcepts.hpp
     IoError.hpp
     JobRunner.hpp
+    JobRunnerBridge.cpp
+    JobRunnerBridge.hpp
     MemoryBudget.cpp
     MemoryBudget.hpp)
 
@@ -25,5 +31,5 @@ target_include_directories(katachi_io PUBLIC "${PROJECT_SOURCE_DIR}/src")
 
 target_link_libraries(
     katachi_io
-    PUBLIC Qt6::Core katachi_core
+    PUBLIC Qt6::Concurrent Qt6::Core Qt6::Gui katachi_core
     PRIVATE katachi_warnings katachi_sanitizers)

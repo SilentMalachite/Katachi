@@ -11,6 +11,7 @@
 #include "core/Result.hpp"
 #include "io/IoError.hpp"
 
+#include <QSet>
 #include <QString>
 
 #include <cstdint>
@@ -50,10 +51,16 @@ struct OutputFileName {
 //              「スキップ（既存）」と表示し、失敗件数に数えない — ADR-0009）
 //   Rename   : _1 から順に空きを探し、上限で打ち切って IoError::WriteFailed
 //
+// reserved は「このバッチで既に予約済みの出力パス」。**実在するものと同じに扱う**
+// （ADR-0009 の追補）。並列実行では、まだ commit されていない出力を実在確認では
+// 見つけられないため、これが無いと 2 つのワーカーが同じ名前を選ぶ。
+// 呼び出し側（JobRunnerBridge）がロックの中で渡し、得たパスを予約集合へ入れる。
+//
 // maxRenameAttempts を引数で受けるのは、上限に達する経路をテストで通すため。
 // 既定の 10000 個のファイルを作るテストは CI で重すぎる（FileSource の上限と同じ考え方）。
 [[nodiscard]] core::Result<QString, IoError>
 resolveCollision(const OutputDirectory& directory, const OutputFileName& fileName,
-                 CollisionPolicy policy, int maxRenameAttempts = defaultMaxRenameAttempts);
+                 CollisionPolicy policy, const QSet<QString>& reserved = {},
+                 int maxRenameAttempts = defaultMaxRenameAttempts);
 
 } // namespace katachi::io

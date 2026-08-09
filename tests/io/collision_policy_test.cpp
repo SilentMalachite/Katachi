@@ -163,7 +163,7 @@ TEST_CASE("Rename gives up after the limit", "[io][collision]") {
 
     const auto result =
         resolveCollision(OutputDirectory{temp.path()}, OutputFileName{QStringLiteral("photo.png")},
-                         CollisionPolicy::Rename, 3);
+                         CollisionPolicy::Rename, {}, 3);
 
     REQUIRE_FALSE(result.isOk());
     REQUIRE(result.error() == IoError::WriteFailed);

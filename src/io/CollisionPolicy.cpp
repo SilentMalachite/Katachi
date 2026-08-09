@@ -6,6 +6,7 @@
 #include <QChar>
 #include <QDir>
 #include <QFileInfo>
+#include <QSet>
 #include <QString>
 
 namespace katachi::io {
@@ -15,18 +16,25 @@ using ResolveResult = core::Result<QString, IoError>;
 
 } // namespace
 
-core::Result<QString, IoError> resolveCollision(const OutputDirectory& directory,
-                                                const OutputFileName& fileName,
-                                                CollisionPolicy policy, int maxRenameAttempts) {
+core::Result<QString, IoError>
+resolveCollision(const OutputDirectory& directory, const OutputFileName& fileName,
+                 CollisionPolicy policy, const QSet<QString>& reserved, int maxRenameAttempts) {
     const QDir dir(directory.v);
     const QString desired = dir.filePath(fileName.v);
+
+    // 予約済みは実在するものと同じに扱う（ADR-0009 の追補）。
+    // まだ commit されていない出力は実在確認では見つからないため、
+    // これが無いと並列実行で 2 つのワーカーが同じ名前を選ぶ。
+    const auto taken = [&reserved](const QString& path) {
+        return reserved.contains(path) || QFileInfo::exists(path);
+    };
 
     // 上書きは実在を確かめる必要がない。
     if (policy == CollisionPolicy::Overwrite) {
         return ResolveResult::ok(desired);
     }
 
-    if (!QFileInfo::exists(desired)) {
+    if (!taken(desired)) {
         return ResolveResult::ok(desired);
     }
 
@@ -48,7 +56,7 @@ core::Result<QString, IoError> resolveCollision(const OutputDirectory& directory
         }
 
         const QString path = dir.filePath(candidate);
-        if (!QFileInfo::exists(path)) {
+        if (!taken(path)) {
             return ResolveResult::ok(path);
         }
     }

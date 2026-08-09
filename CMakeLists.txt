@@ -29,7 +29,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(KATACHI_SANITIZE "Enable AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 
 # CLAUDE.md: Qt 6.8 LTS 以上。Qt は LGPLv3 のため動的リンクのみ（docs/licenses.md）。
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets)
+# Concurrent は QtConcurrent::mapped（docs/spec-core.md §6）のために要る。
+# qtbase 同梱のはずだが「入っているはず」で進めない。CI で実際に通ることを確認する
+# （Phase 1 の qtimageformats の件があるため）。
+find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Widgets)
 
 # 警告設定は INTERFACE ターゲットで配る。FetchContent で取得する第三者コード
 # （Catch2）へ -Werror を波及させないため、グローバルフラグにはしない。
