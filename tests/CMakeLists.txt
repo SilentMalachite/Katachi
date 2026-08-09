@@ -11,7 +11,8 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(Catch2)
 
-add_executable(katachi_tests main.cpp core/qt_image_plugins_smoke.cpp core/result_test.cpp)
+add_executable(katachi_tests main.cpp core/qt_image_plugins_smoke.cpp core/result_test.cpp
+                            core/format_id_test.cpp)
 
 target_link_libraries(
     katachi_tests

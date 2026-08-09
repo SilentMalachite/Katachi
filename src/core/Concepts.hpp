@@ -22,6 +22,7 @@ concept ResultValue = std::destructible<T> && std::is_nothrow_move_constructible
 // equality_comparable を要求するのはテストで比較するため
 // （docs/cpp-conventions.md §2.2）。
 template <typename E>
-concept ResultError = std::destructible<E> && std::copy_constructible<E> && std::equality_comparable<E>;
+concept ResultError =
+    std::destructible<E> && std::copy_constructible<E> && std::equality_comparable<E>;
 
 } // namespace katachi::core

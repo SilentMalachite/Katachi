@@ -13,6 +13,4 @@
 
 using Forbidden = katachi::core::Result<QString, QString>;
 
-int main() {
-    return 0;
-}
+int main() { return 0; }

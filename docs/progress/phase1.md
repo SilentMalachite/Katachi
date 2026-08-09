@@ -289,3 +289,167 @@ Phase 0 で 0 ファイル走査だった 2 検査が実効性を持った。
 2. `FormatId.hpp` は**フォーマット名の文字列リテラルが許される唯一の場所**。
    スキャナ INV3A の除外がこのファイルにだけ効いていることを、T2 で実際に確認する。
 3. Windows の実機起動確認は Phase 0 から未了のまま。
+
+---
+
+## 2026-08-09 — T2 完了（`FormatId` / `ConvertError` / `ConvertWarning`）
+
+### 実施内容
+
+`FormatId`（強い型付き文字列）と、変換結果を説明する 2 つの列挙を実装した。
+TDD の順序を守り、実装前に意図した理由での失敗（`'core/ConvertError.hpp' file not found`）を確認した。
+
+### 前エントリ（T1）の訂正
+
+**T1 の報告に書いた「`clang-format --dry-run --Werror` exit 0」は、
+実行はしたが新規ファイルを検査していなかった。**
+
+品質ゲートの `clang-format --dry-run --Werror $(git ls-files '*.cpp' '*.hpp')` は
+`git ls-files` に依存する。`git ls-files` は**追跡済み（またはステージ済み）のファイルしか
+列挙しない**。T1 ではコミット前にゲートを実行したため、新規追加した
+`src/core/Concepts.hpp` などが対象から漏れていた。
+
+T2 で `Concepts.hpp` が追跡済みになった結果、T1 由来の整形違反が顕在化した。
+
+```
+src/core/Concepts.hpp:25:22: error: code should be clang-formatted
+```
+
+**手順を変更する。以後、品質ゲートを実行する前に `git add` でステージする。**
+ゲートのコマンド自体は `CLAUDE.md` の記載どおりで変更しない。
+（CI では常にコミット済みの状態で走るため、この穴は CI には無い。
+push していれば CI が検出していた。）
+
+T1 由来の整形違反は本エントリの整形で解消済み。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/core/FormatId.hpp` | 強い型付き文字列と `QString` ⇄ `FormatId` 変換関数 |
+| `src/core/ConvertError.hpp` | `ConvertError`（6 値）と `ConvertWarning`（1 値） |
+| `tests/core/format_id_test.cpp` | 実行時テスト 7 本 + `static_assert` 2 本 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `tests/CMakeLists.txt` | `format_id_test.cpp` を追加 |
+| `src/core/Concepts.hpp` | 整形のみ（上記の訂正による） |
+| `tests/core/compile_fail/result_same_type.cpp` / `tests/core/format_id_test.cpp` | 整形のみ |
+
+**削除**: なし
+
+### 計画からの変更（申告）
+
+**`katachi_core` を `INTERFACE` から `STATIC` へ変更しなかった。**
+
+承認時の計画では「T2 で `STATIC` へ変更する」としていたが、実装前に
+`docs/spec-core.md` §1 のディレクトリ構成を読み直したところ、
+
+```
+│   │   ├── FormatId.hpp            # 強い型付き文字列。文字列リテラル例外はここだけ
+│   │   ├── CapabilityTable.hpp/.cpp
+```
+
+**`FormatId` は `.hpp` のみで `.cpp` が無い**（`CapabilityTable` は `.hpp/.cpp` と明記されている）。
+指示書の明示的な記述を優先し（`agent-protocol.md` §1 の解決順序 1）、変換関数を `inline` として
+ヘッダに置いた。したがって core にはまだ `.cpp` が無く、`STATIC` にできない。
+
+**`STATIC` への変更は `CapabilityTable.cpp` が入る T3 で行う。**
+
+### 実装上の判断（指示書に無い箇所）
+
+1. **`formatIdFromString()` は前後の空白を落とし、小文字へ畳む。**
+   `docs/spec-core.md` §2.1 は変換関数の存在を求めるが、正規化の有無を書いていない。
+   正規化しないと、拡張子や利用者入力から作った `FormatId`（`"PNG"`）が
+   Qt 由来の `FormatId`（`"png"`）と `operator==` で別物になり、
+   `CapabilityTable::find()` が取りこぼす。**振る舞いを変えたい場合は指示を仰ぐ。**
+   別名の吸収（`jpg` → `jpeg` 等）は**行っていない**。指示書に根拠が無く、勝手に決めないため。
+
+2. **`ConvertError` / `ConvertWarning` に基底型 `std::uint8_t` を明示した。**
+   推測ではなく実測で必要性を確認した。`clang-tidy --config-file=.clang-tidy` を
+   ヘッダに直接かけたところ、`performance-enum-size` が **error** を出した（exit 1）。
+   `docs/phases.md` §3 は `performance-*` を必須で有効にしており、除外可能なのは
+   別の 2 種のみ。抑制コメントも禁止されている。列挙子の顔ぶれは
+   `docs/spec-core.md` §2 のままで意味は変えていない。
+
+3. **`formatIdToString()` の引数名を `id` から `format` にした。**
+   `readability-identifier-length`（3 文字未満のパラメータ名を禁止）が error を出したため。
+   **`docs/spec-core.md` §2.1 が定めるメンバ名 `v` は同チェックの対象外**であることを
+   実測で確認済み。仕様の型定義は変えていない。
+
+### 不変条件スキャナが自分の書いたコードを検出した件（記録）
+
+`ConvertError.hpp` のコメントに **`NOLINT` という語そのもの**を書いたところ、
+`invariant.inv6` が落ちた。
+
+```
+core/ConvertError.hpp:12: 警告抑制（CLAUDE.md で禁止。必要と判断したら停止して報告する）
+  > // NOLINT による抑制は CLAUDE.md で禁止されている。
+```
+
+INV6 は**コメントを除去しない**設計である（抑制指示はコメントとして書かれるため）。
+したがって語の言及と実際の抑制を区別できない。**これはスキャナの正しい動作**であり、
+コメントの文言を変えて解消した。スキャナ側を緩めていない。
+
+### `FormatId.hpp` の除外がそこにだけ効くことの確認（T1 で約束した検証）
+
+1. `src/core/FormatId.hpp` に `"png"` を含む一時的な記述を足して `INV3A` を実行
+   → **見逃される**（`ok`）。除外が効いている
+2. **同じ記述を `src/core/Result.hpp` に足して `INV3A` を実行
+   → `core/Result.hpp:50` を指して検出**。除外が他ファイルへ漏れていない
+
+両方の一時的な記述は削除済み（`git status` で復元を確認）。
+
+### 追加・変更したテスト（7 本追加。21 → 28）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `formatIdFromString round-trips through formatIdToString` | `formatIdToString(formatIdFromString("png")) == "png"` | pass |
+| `formatIdFromString folds case so lookups are stable` | `"PNG"` と `"png"`、`"JpEg"` と `"jpeg"` が等しい | pass |
+| `formatIdFromString trims surrounding whitespace` | `"  png\t"` と `"png"` が等しい | pass |
+| `FormatId distinguishes different names` | `"png"` と `"bmp"` が等しくない | pass |
+| `FormatId comparison is value based` | 同じ名前から作った 2 値が `==`、`.v` も一致 | pass |
+| `ConvertError values are distinct and comparable` | 6 列挙値が互いに区別され、同値比較が成立 | pass |
+| `ConvertWarning carries the alpha fallback case` | `AlphaFlattenedFallback` が比較可能 | pass |
+
+`static_assert`: `ResultValue<FormatId>` / `ResultError<ConvertError>`。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。**ステージ済みの状態で実行**）
+
+`git ls-files '*.cpp' '*.hpp'` の対象は 19 ファイル。
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **28 / 28 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev` | exit 0 |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **28 / 28 pass** |
+
+**clang-tidy ゲートの現在の到達範囲に注意。** 対象は `git ls-files 'src/*.cpp'`、
+すなわち `src/app/main.cpp` と `src/app/MainWindow.cpp` の 2 本だけである。
+core はまだ `.cpp` を持たず、`src/app` の 2 本は core ヘッダを include していないため、
+**`HeaderFilterRegex` 経由でも core のヘッダに届いていない。**
+本エントリで core ヘッダに対して行った clang-tidy 検査は、
+`--config-file` を使った手動実行である。
+**T3 で `CapabilityTable.cpp` が入ると、ゲートが core ヘッダへ自動的に届くようになる。**
+
+### 推測で埋めた箇所
+
+**なし。** `performance-enum-size` と `readability-identifier-length` の必要性は、
+いずれも clang-tidy を実際に走らせて確認した。
+
+### 残課題 / 次にやること
+
+1. **T3（`CapabilityTable` と `CapabilitySource` concept）に着手する。**
+   ここで `katachi_core` を `INTERFACE` から `STATIC` へ変更する。
+2. T3 で clang-tidy ゲートが core ヘッダに届くようになる。
+   **届いた結果として新たな指摘が出ないか確認する。**
+3. `formatIdFromString()` の正規化（小文字化・trim）は指示書に根拠が無い判断。
+   不要であれば指示を仰いで戻す。
+4. Windows の実機起動確認は Phase 0 から未了のまま。
