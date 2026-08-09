@@ -2,6 +2,11 @@
 # 有効: bugprone-* cppcoreguidelines-* modernize-* performance-* readability-* misc-*
 # 除外可として明示されているもの: cppcoreguidelines-pro-bounds-* / modernize-use-trailing-return-type
 #
+# pro-bounds-avoid-unchecked-container-access は Phase 2 T7 で追加した。
+# docs/phases.md §3 が「cppcoreguidelines-pro-bounds-* は除外可」と定めた枠の中であり、
+# 新しい種類の除外ではない（3 つ目の除外である bugprone-exception-escape とは事情が違う）。
+# 添字が範囲内であることを呼び出し側が保証している箇所で出るため。
+#
 # bugprone-exception-escape は §3 の「除外可」に無いが、承認を得て追加した 3 つ目の除外。
 # ADR-0002 は「コア関数は noexcept を維持し、確保失敗時の std::terminate を意図的に
 # 受け入れる」と決めている。この検査はまさにその形（noexcept 関数から例外が抜けうる）を
@@ -18,6 +23,7 @@ Checks: >
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
   -cppcoreguidelines-pro-bounds-constant-array-index,
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
   -modernize-use-trailing-return-type,
   -bugprone-exception-escape
 

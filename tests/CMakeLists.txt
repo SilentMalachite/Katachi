@@ -65,6 +65,19 @@ list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 catch_discover_tests(katachi_tests)
 
+# app 層のテストは QApplication が要るため実行ファイルを分ける。
+# katachi_tests（core と io）に Qt6::Widgets を持ち込まないための分割でもある。
+#
+# katachi_app は Qt6::Widgets と katachi_io を伝播するため、ここでは重ねて書かない
+# （同じアーカイブが 2 回並ぶと Apple ld が警告を出す。T1 の知見）。
+add_executable(katachi_app_tests app/main.cpp app/job_table_model_test.cpp)
+
+target_link_libraries(katachi_app_tests PRIVATE Catch2::Catch2 katachi_app katachi_warnings
+                                                katachi_sanitizers)
+
+# GUI を持たない環境でも走らせる（docs/phases.md §2.4 は CI について同じ指定をしている）。
+catch_discover_tests(katachi_app_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # Result<T,E> の T == E 排除はコンパイルエラーとして現れるため、実行時テストでは観測できない。
 # 「ビルドが失敗すること」を確認する（不変条件スキャナのネガティブテストと同じ考え方）。
 # EXCLUDE_FROM_ALL のため通常のビルドでは作られない。

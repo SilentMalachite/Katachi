@@ -1668,3 +1668,143 @@ ASan / UBSan 版でも 135 / 135 green。
 3. 出力の拡張子が `.jpeg` になる件の判断（T4 で報告。T8 の範囲）。
 4. `.serena/` は未追跡のまま。
 5. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
+
+---
+
+## 2026-08-09 — T7 完了（`JobTableModel`）。app 層のテスト実行ファイルを新設
+
+### 実施内容
+
+ジョブ一覧の表を実装した。併せて `tests/app/` と `katachi_app_tests` を新設した。
+TDD の順序を守り、テストを先に書いてから実装した。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/app/JobTableModel.hpp/.cpp` | `QAbstractTableModel`。列は 入力 / 出力 / 状態 / 理由 |
+| `tests/app/main.cpp` | `QApplication` を構築する Catch2 の入口 |
+| `tests/app/job_table_model_test.cpp` | 実行時テスト 7 本 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `src/app/CMakeLists.txt` | `JobTableModel` を追加、`katachi_io` をリンク |
+| `tests/CMakeLists.txt` | `katachi_app_tests` の新設（`QT_QPA_PLATFORM=offscreen` 付き） |
+| `.clang-tidy` | `cppcoreguidelines-pro-bounds-avoid-unchecked-container-access` を除外（下記） |
+
+**削除**: なし
+
+### 設計上の判断
+
+**行を並べ替えない。** 並列実行では完了順が入力順と一致しないが、
+表の並びが勝手に動くと利用者が見ている行が入れ替わる（`docs/spec-core.md` §7 の
+「自動スクロール禁止」と同じ趣旨）。結果は `sourcePath` で引いて**その行だけ**を更新する。
+
+**更新は `dataChanged` を行単位で出す。** 全体を `beginResetModel` すると
+選択もスクロール位置も飛ぶ。テストで「1 行だけ」を固定した。
+
+**表に無い入力の結果は黙って捨てる。** 行を増やすと並びが崩れる。落ちもしない。
+
+**列は `enum` ではなく `constexpr int`。** `QModelIndex::column()` が `int` を返すため、
+`enum class` にすると比較のたびに変換が要る。素の `enum` は
+`cpp-conventions.md` §1 と clang-tidy の `cppcoreguidelines-use-enum-class` が禁じる。
+
+**表示文言は app 層にしか置かない**（ADR-0010）。`QObject::tr()` を使い、
+`QStringLiteral` は使わない（Qt 6.8 と 6.11 で提供ヘッダが異なる件。Phase 0 の知見）。
+
+### 承認された計画からの追加（申告）
+
+計画の T7 は 5 本のテストだったが、次を足した。
+
+1. **`succeededCount()` / `failedCount()` / `skippedCount()` を持たせた。**
+   T9 のステータス行で「成功 n 件 / 失敗 m 件」を出すために要る。テストでも検証した。
+2. **成功時の警告を理由列に出す**（テスト `a successful job shows its output and any warning`）。
+   ADR-0004 は「変換は成功したが指定どおりには処理できなかった」ことを
+   `ConversionOutput::warnings` に載せると決めたが、**UI での行き先が決まっていなかった。**
+   理由列に出さないと、この警告は誰にも届かない。
+3. **`an unknown outcome is ignored`** を足した。並列実行では、表を作り直した直後に
+   前のバッチの結果が届きうる。落ちないことを固定した。
+4. **`katachi_app_tests` に `QT_QPA_PLATFORM=offscreen` を設定した。**
+   `docs/phases.md` §2.4 は CI について同じ指定をしている。GUI を持たない環境でも走るようにした。
+
+### clang-tidy の指摘 6 件と対処
+
+app に新しい `.cpp` が入ったため、まとめて指摘が出た。
+
+| 指摘 | 対処 |
+|---|---|
+| `cppcoreguidelines-use-enum-class` / `performance-enum-size`（列の `enum`） | `constexpr int` の定数へ |
+| `misc-include-cleaner`（`std::decay_t` / `QStringList` / `emit`） | `<type_traits>` を追加、`QList<QString>` と綴る、`<QtCore/qtmetamacros.h>` を追加 |
+| `cppcoreguidelines-pro-bounds-avoid-unchecked-container-access`（`rows_[row]`） | **`.clang-tidy` で除外した**（下記） |
+
+**除外を 1 つ増やしたが、新しい種類の除外ではない。**
+`docs/phases.md` §3 は「`cppcoreguidelines-pro-bounds-*` は除外可」と明示しており、
+既に同じ枠から 3 つ除外している。今回の 4 つ目はその枠の中にある。
+（Phase 1 で承認を得た `bugprone-exception-escape` は枠の外だったため事情が違う。）
+`.clang-tidy` に理由をコメントとして残した。**`docs/phases.md` の変更は不要。**
+
+添字が範囲内であることは直前の `QHash` 検索が保証している。
+`std::next(begin(), row)` へ書き換える案は、読みやすさを落とすだけと判断した。
+
+### 追加・変更したテスト（7 本追加。135 → 142）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `the model exposes one row per job` | 3 行 4 列。入力列は**ファイル名**。実行前は「待機中」で出力も理由も空。見出しが 4 列とも空でない | pass |
+| `a failed job keeps its row and shows the reason` | 行は**消えず**、状態が「失敗」、理由が空でない。**他の行は巻き込まれない** | pass |
+| `a skipped job is shown as skipped not failed` | `DestinationExists` の行は「スキップ」。失敗と**別の文言**。`failedCount()==1` / `skippedCount()==1` | pass |
+| `a successful job shows its output and any warning` | 「成功」、出力列にファイル名、**警告が理由列に出る** | pass |
+| `updating one row emits dataChanged for that row only` | `dataChanged` が **1 回**、範囲は**その行のみ**（row 2 → 2） | pass |
+| `the model never reorders rows` | 完了順が c → a でも並びは a / b / c のまま。未完了の行は「待機中」 | pass |
+| `an unknown outcome is ignored` | 表に無い入力の結果で**行が増えず**、既存の行も変わらない | pass |
+
+**文言そのものを期待値に固定した。** 表示文言は app 層にしか無く、
+変えるときはテストも一緒に動くべきで、黙って変わってよいものではない。
+
+### 実行ファイルを分けたことの確認（リンク行の実測）
+
+```
+=== katachi_tests ===              === katachi_app_tests ===
+libkatachi_core.a                  libkatachi_app.a
+libkatachi_io.a                    libkatachi_core.a
+QtConcurrent.framework             libkatachi_io.a
+QtCore.framework                   QtConcurrent.framework
+QtGui.framework                    QtCore.framework
+                                   QtGui.framework
+                                   QtWidgets.framework
+```
+
+**core と io のテストは `QtWidgets` を引いていない。** 1 つにまとめると、
+io が Widgets を引いていなくてもテストバイナリ経由で見えてしまい、担保が弱くなる。
+どのアーカイブも 1 回ずつで、重複リンクも起きていない。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **142 / 142 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev`（対象 11 ファイル） | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **142 / 142 pass** |
+
+不変条件スキャナ 7 種も引き続き green。**`INV3B`（app にフォーマット名の文字列リテラルが無い）
+が実効性を持った**（`src/app` に初めて文言を持つ `.cpp` が入ったため）。
+
+### 推測で埋めた箇所
+
+**なし。**
+
+### 残課題 / 次にやること
+
+1. **T8（`SettingsPanel`）に着手する。** 出力形式の選択肢を能力表から作る。
+   **出力の拡張子が `.jpeg` になる件（T4 で報告）はこのタスクの範囲。**
+2. **CI で未確認の 2 点**（`Qt6::Concurrent` の入手 / `mapped` の `QThreadPool*` 版が Qt 6.8 にあるか）。
+   push の時期について判断を仰ぎたい。
+3. `.serena/` は未追跡のまま。
+4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
