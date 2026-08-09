@@ -81,6 +81,55 @@ target_link_libraries(katachi_app_tests PRIVATE Catch2::Catch2 katachi_app katac
 # GUI を持たない環境でも走らせる（docs/phases.md §2.4 は CI について同じ指定をしている）。
 catch_discover_tests(katachi_app_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+# テスト専用の QImageIOPlugin と、それを使う検査（Phase 3 T4）。
+#
+# docs/phases.md §4 Phase 3 の受け入れ基準 3「能力表が追加コーデックを自動的に
+# 反映する（コード変更不要）」を、実コーデックの有無と無関係に検査する。
+#
+# **実行ファイルを分ける。** 架空の形式が katachi_tests から見えると、
+# core / io の既存テストが見る能力表まで変わってしまう。検査したいのは
+# 「置けば増える」ことであって、既存テストの前提を動かすことではない。
+set(KATACHI_TEST_PLUGIN_ROOT "${CMAKE_CURRENT_BINARY_DIR}/test-plugins")
+
+add_library(katachi_test_plugin MODULE plugins/TestFormatPlugin.cpp)
+
+# AUTOMOC はこのターゲットにだけ効かせる（Catch2 へ波及させない。src/app と同じ考え方）。
+set_target_properties(
+    katachi_test_plugin
+    PROPERTIES AUTOMOC ON PREFIX "" LIBRARY_OUTPUT_DIRECTORY
+                                    "${KATACHI_TEST_PLUGIN_ROOT}/imageformats")
+
+target_link_libraries(katachi_test_plugin PRIVATE Qt6::Gui katachi_warnings katachi_sanitizers)
+
+add_executable(katachi_plugin_tests main.cpp plugins/extra_codec_test.cpp)
+
+add_dependencies(katachi_plugin_tests katachi_test_plugin katachi_fixtures)
+
+target_compile_definitions(katachi_plugin_tests PRIVATE KATACHI_FIXTURE_DIR="${KATACHI_FIXTURE_DIR}")
+
+target_link_libraries(katachi_plugin_tests PRIVATE Catch2::Catch2 Qt6::Gui katachi_io
+                                                   katachi_warnings katachi_sanitizers)
+
+# この実行ファイルは build/<preset>/tests/ に置かれるため、Qt の
+# 「実行ファイルの隣の plugins/」自動探索の対象外である。明示的に渡す。
+#
+# KATACHI_EXTRA_CODECS=ON のときは実コーデックの配置先も足す。
+# そうすると「全 encodable 形式を横断する変換」が実コーデックも対象に含む。
+set(katachi_test_plugin_path "${KATACHI_TEST_PLUGIN_ROOT}")
+
+if(KATACHI_EXTRA_CODECS)
+    if(WIN32)
+        set(katachi_test_plugin_path
+            "${katachi_test_plugin_path}\;${KATACHI_EXTRA_PLUGIN_ROOT}")
+    else()
+        set(katachi_test_plugin_path "${katachi_test_plugin_path}:${KATACHI_EXTRA_PLUGIN_ROOT}")
+    endif()
+    add_dependencies(katachi_plugin_tests katachi_extra_codecs)
+endif()
+
+catch_discover_tests(katachi_plugin_tests PROPERTIES ENVIRONMENT
+                     "QT_PLUGIN_PATH=${katachi_test_plugin_path}")
+
 # Result<T,E> の T == E 排除はコンパイルエラーとして現れるため、実行時テストでは観測できない。
 # 「ビルドが失敗すること」を確認する（不変条件スキャナのネガティブテストと同じ考え方）。
 # EXCLUDE_FROM_ALL のため通常のビルドでは作られない。

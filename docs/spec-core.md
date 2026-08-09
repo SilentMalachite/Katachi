@@ -11,6 +11,7 @@ C++ の書き方は `docs/cpp-conventions.md`、Phase 分割と受け入れ基�
 katachi/
 ├── CMakeLists.txt / CMakePresets.json / .clang-format / .clang-tidy
 ├── cmake/QualityGates.cmake
+├── cmake/ExtraCodecs.cmake / CollectExtraCodecs.cmake  # 追加コーデック（ADR-0013）。既定 OFF
 ├── src/
 │   ├── core/          # 依存: Qt6::Core, Qt6::Gui のみ（Widgets 禁止）
 │   │   ├── Concepts.hpp            # core 層の concept のみ

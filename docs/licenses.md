@@ -118,7 +118,37 @@ GPL のみで提供されるライブラリを選べる（ADR-0012）。
 **導入判断より先にライセンスを確認する**という手順は変えない。
 判断に迷う場合は停止して指示を仰ぐ（`CLAUDE.md` 停止条件 7）。
 
-現時点では追加コーデックを導入していない。
+### 5.1 調査結果（2026-08-09 に一次情報で確認。Phase 3 T2）
+
+**まだ導入していない。** 下表は導入判断のための調査結果である（**ADR-0013**）。
+
+| 対象 | 版 | ライセンス | 出典（2026-08-09 取得） | GPLv3 との両立 |
+|---|---|---|---|---|
+| libavif | 1.4.2 | BSD-2-Clause（`LICENSE` に同梱コードの条項も併記） | `raw.githubusercontent.com/AOMediaCodec/libavif/main/LICENSE` | **可** |
+| libjxl | 0.12.0 | BSD-3-Clause | `raw.githubusercontent.com/libjxl/libjxl/main/LICENSE` | **可** |
+| LibRaw | 0.22.2 | LGPL-2.1 または CDDL-1.0 の**選択制**。LGPL-2.1 を選ぶ | `raw.githubusercontent.com/LibRaw/LibRaw/master/COPYRIGHT` | **可** |
+| kimageformats `psd` / `raw` プラグイン | v6.20.0 | LGPL-2.0-or-later | `.../KDE/kimageformats/master/src/imageformats/psd.cpp` / `raw.cpp` の SPDX | **可** |
+| kimageformats `avif` / `jxl` プラグイン | v6.20.0 | BSD-2-Clause | 同 `avif.cpp` / `jxl.cpp` の SPDX | **可** |
+| extra-cmake-modules (ECM) | v6.20.0 | `COPYING-CMAKE-SCRIPTS` に BSD 系の条項 | `.../KDE/extra-cmake-modules/master/COPYING-CMAKE-SCRIPTS` | ビルド時のみ（§3 と同じ扱い。成果物に含まれない） |
+
+**LGPL-2.1 / LGPL-2.0-or-later が GPLv3 と両立する根拠**: LGPL 第 3 条が
+「この License の代わりに通常の GPL version 2 **またはそれ以降**を適用してよい」と定めている
+（LibRaw 同梱の `LICENSE.LGPL` 211 行目で条文を確認した）。
+
+### 5.2 HEIF について（**以前の記述の訂正**）
+
+Phase 3 の計画時、HEIF を対象外とする理由として
+「libheif の HEVC エンコーダ backend が GPL-2.0-only ならリンクできない」と述べていた。
+**この前提は誤りである。**
+
+| 対象 | ライセンス | 出典 |
+|---|---|---|
+| libheif（ライブラリ本体） | LGPL v3 | `raw.githubusercontent.com/strukturag/libheif/master/COPYING` |
+| x265 | **GPL-2.0-or-later**（ソースヘッダに "either version 2 of the License, or (at your option) any later version"） | `raw.githubusercontent.com/videolan/x265/master/source/encoder/encoder.cpp` |
+
+**どちらも GPLv3 と両立する。** 上表の「GPLv2 only はリンクできない」に該当しない。
+**HEIF を導入しない判断は、ライセンスではなく依存の重さと、macOS では
+`qmacheif` により既に読み書きできること（Phase 3 T1 の実測）に基づく**（ADR-0013）。
 
 ---
 
