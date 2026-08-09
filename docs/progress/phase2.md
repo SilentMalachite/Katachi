@@ -1391,3 +1391,121 @@ with_text.png                           with_text.png
 2. 出力の拡張子が `.jpeg` になる件の判断（T4 で報告。T8 の範囲）。
 3. `.serena/` は未追跡のまま。
 4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
+
+---
+
+## 2026-08-09 — T5 完了（`MemoryBudget`）
+
+### 実施内容
+
+ADR-0008 のバイト予算を実装した。`docs/phases.md` §5.3 が
+「Phase 2 着手時に決める」としていた項目の実装側。
+TDD の順序を守り、実装前に意図した理由での失敗
+（`'io/MemoryBudget.hpp' file not found`）を確認した。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/io/MemoryBudget.hpp/.cpp` | `estimateJobBytes()` / `MemoryBudget` / `MemoryBudget::Reservation`（RAII） |
+| `tests/io/memory_budget_test.cpp` | 実行時テスト 6 本（うち 1 本は別スレッドで待ちを確認） |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `src/io/CMakeLists.txt` | `MemoryBudget.cpp/.hpp` を追加 |
+| `tests/CMakeLists.txt` | `io/memory_budget_test.cpp` を追加 |
+
+**削除**: なし
+
+### 設計上の判断
+
+**単位を MiB にした。** `QSemaphore` は `int` で数えるため、バイトのまま渡すと
+総量を大きくしたときに溢れる。1 GiB は `int` に収まるが、収まることに依存したくない。
+
+**見積りが総量以上なら「全量を確保」に丸める。** これが ADR-0008 の「単独実行」。
+判定を切り上げ計算より**先**に置いたのは、`estimateJobBytes()` が
+「寸法が分からない」を `qint64` の最大値で表すため。後に置くと
+`bytes + budgetUnitBytes - 1` が溢れる。
+
+**`Reservation` は move のみ。** move 後の元オブジェクトは `owner_` を `nullptr` にして
+**二重に返さない。** これをテストで固定した。
+
+**`peakUnits()` を持たせた。** T10 の受け入れ基準
+「同時確保量の最大値が予算を超えない」を検証するため。CAS で最大値を更新する。
+
+### 承認された計画からの変更（申告）
+
+**見積りのテストの期待値を ADR-0008 の式に合わせた。**
+
+計画（承認時）の期待値は `ファイルサイズ + 4*64*64 + ファイルサイズ` だったが、
+**その後 T0 で係数 16 への変更を承認いただいている**（`src/core/Converter.cpp` の
+アルファ合成で画像が 4 枚同時に生存するため）。テストは ADR-0008 の式
+
+```
+estimate = 2 * fileSize + 16 * max(sourcePixels, resizeBoundPixels)
+```
+
+をそのまま期待値にした。**係数を変えた承認は T0 で得ているが、
+計画のテスト期待値の記述は更新していなかったため、ここで明示しておく。**
+
+### 追加・変更したテスト（6 本追加。122 → 128）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `the budget admits jobs up to its total` | 総量 4 単位で 2+2 が同時に通り、`usedUnits()` と `peakUnits()` が 4 | pass |
+| `the budget blocks the third job until one returns` | 4 単位を使い切った状態で 3 件目は**通らない**。1 件返すと通る | pass |
+| `an oversized job runs exclusively` | 総量の 250 倍の見積りでも**デッドロックせず**、確保量は総量ちょうど。抜けると 0 に戻る | pass |
+| `the guard releases on every path` | スコープを抜けると 0。**move 後の元ガードは二重に返さない** | pass |
+| `the estimate follows the ADR-0008 formula` | `2*1000 + 16*64*64`。拡大リサイズでは出力側の寸法、縮小では入力側のまま | pass |
+| `an unknown size is treated as the whole budget` | 無効な `QSize` は総量へ丸められ、確保は総量ちょうど | pass |
+
+**待ちのテストは空振りしない形にした。** 別スレッドが `acquire()` に入ったことを
+フラグで確認してから「まだ通っていない」を判定する。入る前に判定すると、
+スレッドが起動していないだけで通ってしまう。
+
+### フレーキーでないことの確認
+
+待ちを含むテストは時間に依存するため、**予算関連のテストだけを 5 回連続で実行した。**
+5 回とも exit 0。ASan / UBSan 版でも green。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **128 / 128 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev`（対象 9 ファイル） | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **128 / 128 pass**（並行確保のテストを含む） |
+
+**clang-tidy の指摘 1 件と対処（抑制なし）**
+
+```
+MemoryBudget.hpp:25:43: error: performing an implicit widening conversion to type 'const qint64'
+                               of a multiplication performed in type 'int'
+                               [bugprone-implicit-widening-of-multiplication-result]
+```
+
+`1024 * 1024` を `int` で計算してから `qint64` へ広げていた。`1024LL * 1024` に直した。
+**この値は溢れないが、指摘自体は正しい**（同じ書き方で総量を大きくすると溢れる）。
+
+### 推測で埋めた箇所
+
+**なし。** 係数 16 は `src/core/Converter.cpp` を読んで数えた値であり、
+「寸法が分からないときの扱い」は ADR-0008 の決定に従った。
+
+### 残課題 / 次にやること
+
+1. **T6（`JobRunnerBridge`）に着手する。** Phase 2 で最も大きいタスク。
+   `QtConcurrent::mapped` / `QFutureWatcher` / 200ms の進捗間引き / キャンセル /
+   **ADR-0009 追補の名前予約（案 A）**。
+   併せて、T0 で「未確認」とした 3 点を実測して記録する
+   （Qt 6.8 の `QThreadPool*` 版 / `Qt6::Concurrent` の入手 / キャンセル後の `finished`）。
+2. 出力の拡張子が `.jpeg` になる件の判断（T4 で報告。T8 の範囲）。
+3. `.serena/` は未追跡のまま。
+4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
