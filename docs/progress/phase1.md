@@ -160,3 +160,132 @@ ADR は実装より先（T0）に書く。決定を記録してから実装す�
 2. T1 で `src/core` が実在するようになるため、`invariant.inv3a` / `invariant.inv4` が
    空振りでなくなる。**走査対象が 0 ファイルでないことを確認する。**
 3. Windows の実機起動確認は Phase 0 から未了のまま。
+
+---
+
+## 2026-08-09 — T1 完了（`Result<T,E>` と core 層 concept）
+
+### 実施内容
+
+`src/core` を新設し、`Result<T,E>` と core 層の concept（`ResultValue` / `ResultError`）を実装した。
+TDD の順序（失敗するテスト → 意図した理由の確認 → 実装）を守った。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/core/CMakeLists.txt` | `katachi_core`。**依存は `Qt6::Core` / `Qt6::Gui` のみ。`Qt6::Widgets` をリンクしない** |
+| `src/core/Concepts.hpp` | `ResultValue` / `ResultError`（`cpp-conventions.md` §2.2 の定義どおり） |
+| `src/core/Result.hpp` | `std::variant<T,E>` 実装。`requires(!std::same_as<T,E>)` |
+| `tests/core/result_test.cpp` | 実行時テスト 4 本 + `static_assert` 群 |
+| `tests/core/compile_fail/result_same_type.cpp` | `T == E` 排除のコンパイル失敗テスト用 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `CMakeLists.txt` | `add_subdirectory(src/core)` を `src/app` より前に追加 |
+| `tests/CMakeLists.txt` | `result_test.cpp` の追加、`katachi_core` のリンク、コンパイル失敗テストの登録 |
+
+**削除**: なし
+
+### 設計上の判断
+
+**`katachi_core` は T1 時点では `INTERFACE` ライブラリ。** `Concepts.hpp` / `Result.hpp` が
+ヘッダのみで、`STATIC` にするとソースが無くて CMake が失敗するため。
+**`FormatId.cpp` が入る T2 で `STATIC` へ変更する。** 空の `.cpp` を置いて `STATIC` にする案は、
+死んだコードを作るため採らなかった。
+
+**`Qt6::Widgets` をリンクしないことが INV4 の実体的な担保になる。**
+リンクしなければ `#include <QWidget>` のようなフラットヘッダは include パスに無く、
+コンパイル時に落ちる。スキャナ INV4 はテキスト上の検出を担う。両方が揃って初めて塞がる。
+
+**`value()` / `error()` は `std::get` を使わず `assert` + `std::get_if` で実装した。**
+`std::get` は契約違反時に `std::bad_variant_access` を投げるが、
+core では例外を送出できない（`CLAUDE.md` 絶対禁止）。契約は実行時アサートで担保する
+（`cpp-conventions.md` §2.5 の表どおり）。`noexcept` は付けていない
+（`spec-core.md` §2 のシグネチャに無いため。明示的な記述を優先した）。
+
+### TDD の経過（記録として残す）
+
+1. `tests/core/result_test.cpp` を先に書き、CMake を配線してビルド
+2. **意図した理由での失敗を確認**: `fatal error: 'core/Concepts.hpp' file not found`
+3. `Concepts.hpp` / `Result.hpp` を実装
+4. **ここで想定外の失敗**（下記）
+
+**想定外の失敗と対処。**
+
+`static_assert(!requires { typename Result<QString, QString>; })` を否定側テストとして
+書いたが、これはコンパイルエラーになった。
+
+```
+error: constraints not satisfied for class template 'Result' [with T = QString, E = QString]
+```
+
+制約を満たさないクラステンプレートの特殊化を名前で指すことは**代入失敗ではなくハードエラー**で、
+`requires` 式が `false` に評価される前にコンパイルが止まる。当初の想定が誤っていた。
+
+対処: **「そのファイルのビルドが失敗すること」を ctest で確認する方式に変更した。**
+`tests/core/compile_fail/result_same_type.cpp` を `EXCLUDE_FROM_ALL` の
+ターゲットとして持ち、`ctest` から `cmake --build --target` を呼んで `WILL_FAIL TRUE` で判定する。
+不変条件スキャナのネガティブテストと同じ考え方。
+
+**この過程で、失敗したビルドの直後に `ctest` を走らせて「16/16 pass」を得るという
+誤りを一度犯した。** 実際には古いテストバイナリが走っていた。
+以後、**ゲートは終了コードを変数で受けて判定する**（`grep` のパイプ後の `$?` を見ない）。
+
+### 追加・変更したテスト（5 本追加。16 → 21）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `Result::ok reports success and yields the value` | `isOk()==true`、`value()==42` | pass |
+| `Result::err reports failure and yields the error` | `isOk()==false`、`error()==TestError::Alpha` | pass |
+| `Result carries a moved-in QByteArray payload` | `isOk()==true`、`value().size()==3` | pass |
+| `Result distinguishes error values of the same type` | `Alpha != Beta` が区別される | pass |
+| `core.result.rejects_same_type` | `Result<QString,QString>` を含むファイルの**ビルドが失敗する** | pass（`WILL_FAIL`） |
+
+`static_assert` による契約（実行時テストではないがコンパイル時に検証される）:
+
+- 肯定: `ResultValue<int>` / `ResultValue<QByteArray>` / `ResultValue<QString>` / `ResultError<TestError>`
+- **否定: `!ResultValue<ThrowingMove>`**（move 構築が `noexcept` でない型）、
+  **`!ResultError<NoEquality>`**（`operator==` を持たない型）
+- 肯定: `requires { typename Result<QString, TestError>; }`
+- `ResultValue<QString> && ResultError<QString>` — これにより、コンパイル失敗テストが落ちる理由が
+  「concept 不適合」ではなく「`requires(!same_as<T,E>)`」であることが確定する
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **21 / 21 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev` | exit 0 |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **21 / 21 pass** |
+
+### 不変条件スキャナが空振りでなくなったことの確認（計画で約束した検証）
+
+`src/core` に `Concepts.hpp` / `Result.hpp` が実在するようになったため、
+Phase 0 で 0 ファイル走査だった 2 検査が実効性を持った。
+
+- `INV3A` / `INV4` とも `src/core` を走査して green
+- **空振りでないことの確認**: `src/core` に文字列リテラルを含む一時ファイルを置いて
+  `INV3A` を実行し、`core/__tmp_probe.hpp:2` を指して落ちることを確認した。一時ファイルは削除済み
+
+### 推測で埋めた箇所
+
+**なし。**
+
+`static_assert(!requires{...})` が使えると想定していた点は推測ではなく**誤り**であり、
+ビルドで検出して方式を変更した。上記「TDD の経過」に記録した。
+
+### 残課題 / 次にやること
+
+1. **T2（`FormatId` / `ConvertError` / `ConvertWarning`）に着手する。**
+   `katachi_core` を `INTERFACE` から `STATIC` へ変更するのはこのタスク。
+2. `FormatId.hpp` は**フォーマット名の文字列リテラルが許される唯一の場所**。
+   スキャナ INV3A の除外がこのファイルにだけ効いていることを、T2 で実際に確認する。
+3. Windows の実機起動確認は Phase 0 から未了のまま。
