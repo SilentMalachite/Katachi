@@ -200,6 +200,14 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // 8. ICO。**Qt は ICO を読むと内部キー _q_icoOrigDepth を QImage のテキストへ注入する**
+    //    （Phase 1 の T5 追補で記録した挙動）。PreserveSupported でそのまま書き出すと、
+    //    利用者が入れていない内部キーが出力へ漏れる。その回帰を捉えるために置く。
+    const QString iconPath = dir + QStringLiteral("/icon.ico");
+    ok = ok &&
+         writeImage(gradientAlpha(), iconPath, "ico", {}, {}, QImageIOHandler::TransformationNone);
+    ok = ok && checkSize(iconPath);
+
     if (!ok) {
         return 1;
     }
@@ -260,6 +268,19 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         out() << "  oriented.tiff: 向き metadata あり\n";
+    }
+
+    {
+        // 注入される内部キーの顔ぶれは環境で変わりうるため、失敗にはせず必ず出力する。
+        // CI のログに残しておくと、Qt の版による差が出たときに追える。
+        QImageReader reader(iconPath);
+        const QImage decoded = reader.read();
+        if (decoded.isNull()) {
+            err() << "icon.ico を読み戻せない\n";
+            return 1;
+        }
+        out() << "  icon.ico: 読み戻せる（テキストキー: "
+              << decoded.textKeys().join(QLatin1Char(',')) << "）\n";
     }
 
     out() << "すべて検証済み\n";

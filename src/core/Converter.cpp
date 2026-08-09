@@ -14,10 +14,12 @@
 #include <QImageIOHandler>
 #include <QImageReader>
 #include <QImageWriter>
+#include <QList>
 #include <QPainter>
 #include <QSize>
 #include <QString>
 #include <QStringList>
+#include <QStringView>
 #include <Qt>
 #include <QtTypes>
 
@@ -74,6 +76,36 @@ using ConvertResult = Result<ConversionOutput, ConvertError>;
     stripped.setDevicePixelRatio(source.devicePixelRatio());
 
     return stripped;
+}
+
+// Qt が読み取り時に注入する内部キーだけを落とす。
+//
+// 例: ICO を読むと _q_icoOrigDepth が QImage のテキストへ入る（Phase 1 T5 追補で実測）。
+// PreserveSupported の意味は「利用者の metadata を保つ」ことであって、
+// Qt の内部情報を出力へ漏らすことではない。
+//
+// 前置きの _q_ は Qt が内部用の名前に使う接頭辞。利用者のキーは畳まない。
+[[nodiscard]] QImage withoutInternalText(const QImage& source) {
+    // QStringList と綴らないのは clang-tidy の misc-include-cleaner による。
+    // Qt 6 の QStringList は qcontainerfwd.h で宣言された QList<QString> の別名であり、
+    // <QStringList> を include しても「提供ヘッダが未 include」と判定される。
+    // 型そのものを綴って <QList> を直接 include する。
+    const QList<QString> keys = source.textKeys();
+    const auto isInternal = [](const QString& key) { return key.startsWith(QStringView(u"_q_")); };
+
+    if (!std::ranges::any_of(keys, isInternal)) {
+        // 内部キーが無ければ作り直さない。無駄な確保を避ける（ADR-0002）。
+        return source;
+    }
+
+    QImage cleaned = withoutText(source);
+    for (const QString& key : keys) {
+        if (!isInternal(key)) {
+            cleaned.setText(key, source.text(key));
+        }
+    }
+
+    return cleaned;
 }
 
 } // namespace
@@ -155,6 +187,8 @@ Result<ConversionOutput, ConvertError> convert(const QByteArray& source, const C
 
     if (spec.metadata == MetadataPolicy::StripAll) {
         image = withoutText(image);
+    } else if (spec.metadata == MetadataPolicy::PreserveSupported) {
+        image = withoutInternalText(image);
     }
 
     if (spec.icc == IccPolicy::Strip) {

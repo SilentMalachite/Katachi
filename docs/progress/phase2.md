@@ -716,3 +716,135 @@ Phase 2 完了時に 3 つとも揃っていることを T10 で確認する。
    clang-tidy ゲートが io に届くようになる。
 3. `.serena/` は未追跡のまま。T1 のコミットにも含めていない。
 4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
+
+---
+
+## 2026-08-09 — T1.5 完了（Qt の内部テキストキーが出力へ漏れる欠陥の修正）
+
+### 実施内容
+
+Phase 1 の T5 追補で「対応していないこと」として記録した宿題を果たした。
+**判断 3 で「Phase 2 で core を直す」と承認を得たもの。**
+`MetadataPolicy::PreserveSupported` が、Qt が読み取り時に注入する内部キーまで
+出力へ書き出していた。**落ちるテストとして固定してから直した。**
+
+### TDD の経過（RED を実測で確認した）
+
+ICO フィクスチャとテスト 3 本を先に入れてビルドし、**2 本が落ちることを確認した。**
+
+```
+79/100 preserve supported drops qt internal text keys ................***Failed
+  REQUIRE_FALSE( key.startsWith(u"_q_") )
+  _q_icoOrigDepth                                    <- 出力 PNG に漏れていた
+82/100 preserve supported keeps user text while dropping internal keys ***Failed
+  REQUIRE_FALSE( decoded.textKeys().contains(u"_q_probe") )
+83/100 reading the ico fixture injects a qt internal text key .........Passed
+```
+
+**83 は最初から pass。** これは前提の確認であり、Qt が実際に内部キーを注入することを示す。
+79 / 82 が落ちたことで、**欠陥が実在し、テストがそれを捉えている**ことが確定した。
+
+フィクスチャ生成器の実測出力（Qt 6.11.1 / macOS 14 arm64）。
+
+```
+  icon.ico  16958 bytes
+  icon.ico: 読み戻せる（テキストキー: _q_icoOrigDepth）
+```
+
+### 変更ファイル
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `src/core/Converter.cpp` | `withoutInternalText()` を追加し、`PreserveSupported` の経路で呼ぶ |
+| `tests/fixtures/generate.cpp` | ICO フィクスチャ `icon.ico` の生成と、読み戻したテキストキーの出力 |
+| `tests/core/fixtures_test.cpp` | `icon.ico` を大きさ検査へ追加、前提テスト 1 本を追加 |
+| `tests/core/converter_test.cpp` | 内部キーのテスト 2 本を追加 |
+
+**追加 / 削除**: なし（フィクスチャ画像はビルド時生成でコミットしない）
+
+### 実装の要点
+
+- **落とすのは `_q_` で始まるキーだけ。** 利用者のキーは畳まない。
+  `PreserveSupported` の意味は「利用者の metadata を保つ」ことであり、
+  Qt の内部情報を出力へ漏らすことではない
+- **内部キーが 1 つも無ければ画像を作り直さない。** `withoutText()` は生ビットからの
+  作り直しで確保を伴うため、必要なときだけ通す（ADR-0002）
+- 作り直しの際に付随情報が落ちる問題は、T5 追補で `withoutText()` に入れた
+  復元処理（カラーテーブル / DPI / devicePixelRatio / 色空間）がそのまま効く。
+  **同じ穴を二度掘らずに済んだ**
+
+### clang-tidy の指摘 1 件と対処（抑制していない）
+
+```
+Converter.cpp:88:11: error: no header providing "QStringList" is directly included
+                            [misc-include-cleaner]
+```
+
+**`#include <QStringList>` は既に書かれているのに出た。**
+Qt 6 の `QStringList` は `qcontainerfwd.h` で宣言された `QList<QString>` の別名であり、
+フラットヘッダ `<QStringList>` は提供ヘッダとして認識されない。
+
+対処: **型そのものを `QList<QString>` と綴り、`<QList>` を直接 include した。**
+別名を隠すために `auto` へ逃げることはしなかった（型が読めなくなるため）。理由はコードにも残した。
+
+Phase 1 の `QStringLiteral` の件と同種で、**Qt のフラットヘッダは
+include-cleaner から見ると素通しではない**という一般則がある。今後も同じ形で出る。
+
+### 追加・変更したテスト（3 本追加。97 → 100）
+
+| テスト | 期待値 | 修正前 | 修正後 |
+|---|---|---|---|
+| `preserve supported drops qt internal text keys` | ICO → PNG の出力に `_q_` で始まるキーが**1 つも無い** | **fail**（`_q_icoOrigDepth`） | pass |
+| `preserve supported keeps user text while dropping internal keys` | `_q_probe` は消え、**`Description` は残る**（除外が広すぎないことの否定側） | **fail** | pass |
+| `reading the ico fixture injects a qt internal text key` | ICO を読むと `_q_` で始まるキーが注入される（前提の明示） | pass | pass |
+
+2 本目は **ICO の内部挙動に依存しない**。内部キーと利用者キーの両方を持つ画像を
+その場で作って通すため、Qt が ICO の扱いを変えても除外の精度は検証され続ける。
+
+既存の `preserve supported keeps text metadata`（`with_text.png` のテキスト保持）も
+落ちていない。**利用者由来の metadata の扱いは何も変わっていない。**
+
+### CI で落ちうる点（先に書いておく）
+
+**`reading the ico fixture injects a qt internal text key` は Qt の実装詳細に依存する。**
+CI の Qt 6.8.3 が `_q_icoOrigDepth` を注入しない場合、このテストだけが落ちる。
+その場合でも**修正そのものは正しい**（2 本目のテストが内部キーの除外を保証する）。
+落ちたら前提テストの扱いを判断を仰ぐ。**先に想定を書いておき、驚かないようにする。**
+
+### 前 Phase の記録との食い違い（訂正。修正はしていない）
+
+`docs/progress/phase1.md` の T5 追補は
+「`tests/core/fixtures_test.cpp` に `indexed.png` を大きさ検査の対象に追加」と書いているが、
+**実際のコードにはその記述が無かった**（`icon.ico` を足すときに一覧を読んで気づいた）。
+`indexed.png` を使うテスト自体は `converter_test.cpp` に存在し green のため、実害は無い。
+
+**本タスクの範囲外なので直していない**（「ついでに」を避けた）。
+`indexed.png` を大きさ検査へ足すかどうかは指示を仰ぐ。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **100 / 100 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev`（対象 5 ファイル） | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **100 / 100 pass** |
+
+### 推測で埋めた箇所
+
+**なし。** 内部キーが実際に漏れることは、テストを落として確認した。
+`_q_` 接頭辞が Qt の内部用であることは、`icon.ico` の読み戻しで
+`_q_icoOrigDepth` が実測されたことに基づく。
+
+### 残課題 / 次にやること
+
+1. **T2（`FileSource` / `FileSink`）に着手する。** ここで `katachi_io` を
+   `INTERFACE` → `STATIC` へ変更し、**clang-tidy ゲートが io に届くようになる。**
+   届いた結果として新たな指摘が出ないか確認する（Phase 1 の T3 と同じ）。
+2. `indexed.png` を `fixtures_test.cpp` の大きさ検査へ足すかどうかの判断（上記）。
+3. `.serena/` は未追跡のまま。
+4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。

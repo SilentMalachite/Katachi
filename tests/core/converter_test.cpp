@@ -399,6 +399,51 @@ TEST_CASE("flatten keeps the colour space when icc is embed", "[core][convert][m
     REQUIRE(decode(result.value().bytes).colorSpace().isValid());
 }
 
+// -------------------------- Qt の内部テキストキー（Phase 1 T5 追補の宿題。Phase 2 T1.5）
+
+TEST_CASE("preserve supported drops qt internal text keys", "[core][convert][metadata]") {
+    // Qt は ICO を読むと _q_icoOrigDepth を注入する。PreserveSupported でそのまま
+    // 書き出すと、利用者が入れていない内部キーが出力へ漏れる。
+    ConversionSpec spec = specFor(QStringLiteral("png"));
+    spec.metadata = MetadataPolicy::PreserveSupported;
+
+    const auto result = convert(fixture(QStringLiteral("icon.ico")), spec, qtTable());
+
+    REQUIRE(result.isOk());
+    for (const QString& key : decode(result.value().bytes).textKeys()) {
+        INFO(key.toStdString());
+        REQUIRE_FALSE(key.startsWith(QStringLiteral("_q_")));
+    }
+}
+
+TEST_CASE("preserve supported keeps user text while dropping internal keys",
+          "[core][convert][metadata]") {
+    // 除外が広すぎないことの否定側。ICO の内部挙動に依存しないよう、
+    // 内部キーと利用者キーの両方を持つ画像をその場で作る。
+    QImage tagged = decode(fixture(QStringLiteral("gradient_rgb.png")));
+    tagged.setText(QStringLiteral("_q_probe"), QStringLiteral("internal"));
+    tagged.setText(QStringLiteral("Description"), QStringLiteral("katachi fixture"));
+
+    QByteArray encoded;
+    {
+        QBuffer sink(&encoded);
+        REQUIRE(sink.open(QIODevice::WriteOnly));
+        QImageWriter writer(&sink, "png");
+        REQUIRE(writer.write(tagged));
+    }
+    REQUIRE(decode(encoded).textKeys().contains(QStringLiteral("_q_probe")));
+
+    ConversionSpec spec = specFor(QStringLiteral("png"));
+    spec.metadata = MetadataPolicy::PreserveSupported;
+
+    const auto result = convert(encoded, spec, qtTable());
+
+    REQUIRE(result.isOk());
+    const QImage decoded = decode(result.value().bytes);
+    REQUIRE_FALSE(decoded.textKeys().contains(QStringLiteral("_q_probe")));
+    REQUIRE(decoded.text(QStringLiteral("Description")) == QStringLiteral("katachi fixture"));
+}
+
 TEST_CASE("strip all keeps indexed colours intact", "[core][convert][metadata]") {
     // テキスト除去を生ビットからの作り直しで行うと、カラーテーブルまで落ちる。
     // 索引色画像では見た目が壊れる。
