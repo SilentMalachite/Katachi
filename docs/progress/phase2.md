@@ -1316,3 +1316,78 @@ ADR-0009 追補から導いた。
 3. `indexed.png` を `fixtures_test.cpp` の大きさ検査へ足すかどうかの判断（T1.5 で報告）。
 4. `.serena/` は未追跡のまま。
 5. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
+
+---
+
+## 2026-08-09 — `indexed.png` を大きさ検査へ追加（T1.5 で報告した食い違いの解消）
+
+### 実施内容
+
+T1.5 で報告した「`docs/progress/phase1.md` の T5 追補は `indexed.png` を大きさ検査へ
+追加したと書いているが、実際のコードには無い」件について、**追加の指示を得たので直した。**
+
+T1.5 の範囲外だったため当時は直さず報告に留めていた（「ついでに」を避けた）。
+**単独の変更として 1 コミットにする。**
+
+### 変更ファイル
+
+**変更**: `tests/core/fixtures_test.cpp`（`every fixture stays under the 50KB limit` の一覧）
+
+**追加 / 削除**: なし
+
+### 生成器と検査対象が一致したことの確認
+
+足し忘れが再発しないよう、**生成器が作るファイル名と検査一覧を突き合わせた。**
+
+```
+=== 生成器が作るフィクスチャ ===        === 大きさ検査の一覧 ===
+gradient_alpha.png                      gradient_alpha.png
+gradient_rgb.png                        gradient_rgb.png
+icon.ico                                icon.ico
+indexed.png                             indexed.png
+not_an_image.bin                        not_an_image.bin
+oriented.tiff                           oriented.tiff
+with_icc.png                            with_icc.png
+with_text.png                           with_text.png
+```
+
+**8 件対 8 件で完全に一致。** 一覧の先頭に「生成器が作る全 8 件を並べる」旨と、
+足し忘れると 50KB 制限がその 1 件だけ検査されないまま通ることをコメントで残した。
+
+### `docs/progress/phase1.md` の扱い
+
+**書き換えていない。** 同ファイルの冒頭が「誤りを見つけた場合も遡って修正せず、
+新しい日付で訂正を追記する」と定めており、Phase 1 は既にクローズ・マージ済みのため。
+訂正の記録は T1.5 のエントリと本エントリ（Phase 2 の記録）に残す。
+**Phase をまたぐ変更を 1 コミットに混ぜないため**（`agent-protocol.md` §6）、
+`phase1.md` への追記は行わなかった。必要であれば別途指示を仰ぐ。
+
+### 追加・変更したテスト
+
+**新規の追加は無し。** 既存の `every fixture stays under the 50KB limit` の
+検査対象が 7 件 → **8 件**になった。テスト総数は 122 のまま変わらない。
+
+期待値（各フィクスチャについて `exists()` / `size() > 0` / `size() < 50KB`）は変えていない。
+`indexed.png` は 203 バイトで通る。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **122 / 122 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev` | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **122 / 122 pass** |
+
+### 推測で埋めた箇所
+
+**なし。**
+
+### 残課題 / 次にやること
+
+1. **T5（`MemoryBudget`）に着手する。** ADR-0008 のバイト予算。
+2. 出力の拡張子が `.jpeg` になる件の判断（T4 で報告。T8 の範囲）。
+3. `.serena/` は未追跡のまま。
+4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。

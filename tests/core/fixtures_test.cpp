@@ -37,11 +37,14 @@ QByteArray readFixture(const QString& name) {
 
 TEST_CASE("every fixture stays under the 50KB limit", "[fixtures]") {
     // docs/phases.md §2.4 の制約を機械的に確認する。
+    // tests/fixtures/generate.cpp が生成する**全 8 件**を並べる。
+    // 生成器に足したフィクスチャをここへ足し忘れると、50KB 制限が
+    // その 1 件だけ検査されないまま通る（indexed.png が実際にそうなっていた）。
     const QStringList names{
         QStringLiteral("gradient_rgb.png"), QStringLiteral("gradient_alpha.png"),
         QStringLiteral("with_text.png"),    QStringLiteral("with_icc.png"),
-        QStringLiteral("oriented.tiff"),    QStringLiteral("not_an_image.bin"),
-        QStringLiteral("icon.ico")};
+        QStringLiteral("oriented.tiff"),    QStringLiteral("indexed.png"),
+        QStringLiteral("not_an_image.bin"), QStringLiteral("icon.ico")};
 
     for (const QString& name : names) {
         const QFileInfo info(fixturePath(name));
