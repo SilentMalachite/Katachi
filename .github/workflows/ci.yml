@@ -78,7 +78,9 @@ jobs:
       - name: ビルド（警告ゼロ / -Werror・MSVC は /WX）
         run: cmake --build --preset dev
 
-      - name: テスト（不変条件スキャナ 14 本 + smoke 2 本）
+      # 件数を名前に書かない。テストが増えるたびに古くなるため
+      # （Phase 0 の「14 本 + smoke 2 本」が Phase 2 の時点で 142 本になっていた）。
+      - name: テスト（ctest）
         run: ctest --preset dev --output-on-failure
         env:
           QT_QPA_PLATFORM: offscreen
