@@ -85,6 +85,12 @@ cmake --preset asan && ctest --preset asan   # ASan + UBSan（macOS / Linux）
 `.clang-tidy` 有効チェック: `bugprone-*`, `cppcoreguidelines-*`, `modernize-*`, `performance-*`, `readability-*`, `misc-*`
 （`cppcoreguidelines-pro-bounds-*` と `modernize-use-trailing-return-type` は除外可）
 
+**追加の除外（Phase 1 で承認）**: `bugprone-exception-escape`。
+**ADR-0002 と原理的に両立しないため。** ADR-0002 は「コア関数は `noexcept` を維持し、
+確保失敗時の `std::terminate` を意図的に受け入れる」と決めており、この検査は
+まさにその形を禁止する。**これ以上の除外を増やすときも、同じように根拠を ADR に書き、
+ここへ追記すること。黙って増やさない。**
+
 **不変条件スキャナ 6 種（`tests/` に置く。Phase 0 で実装する）**
 
 CLAUDE.md の「絶対禁止」を機械化したもの。人手のレビューに頼らない。

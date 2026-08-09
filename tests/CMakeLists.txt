@@ -33,7 +33,8 @@ add_custom_target(katachi_fixtures ALL DEPENDS "${KATACHI_FIXTURE_DIR}/gradient_
 add_executable(katachi_tests main.cpp core/qt_image_plugins_smoke.cpp core/result_test.cpp
                             core/format_id_test.cpp
                             core/capability_table_test.cpp
-                            core/fixtures_test.cpp)
+                            core/fixtures_test.cpp
+                            core/converter_test.cpp)
 
 add_dependencies(katachi_tests katachi_fixtures)
 

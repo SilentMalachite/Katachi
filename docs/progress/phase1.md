@@ -820,3 +820,151 @@ ADR-0003 に追記する。
 3. `isLossless` は白黒 2 値の探針で判定するため、色を表現できない形式も lossless と出る
    （ADR-0007）。**T5 のラウンドトリップテストで形式を選ぶ際に注意する。**
 4. Windows の実機起動確認は Phase 0 から未了のまま。
+
+---
+
+## 2026-08-09 — T5 完了（`ConversionSpec` と `convert()`）
+
+### 実施内容
+
+Phase 1 の心臓部。純粋関数 `convert()` を実装した。
+テストを先に書き（期待値は `docs/spec-core.md` から導いた）、実装した。
+
+**サブエージェントの使い方**: 利用者から「適宜使ってよい」との指示があったため、
+`docs/agent-protocol.md` §3 の範囲（**調査のみ**。`src/core/` の実装とテストの期待値の
+決定には使わない）で Qt API の挙動調査を 2 件並列で走らせた。
+**実装とテストの期待値はすべて自分で書いた。**
+
+### 停止して判断を仰いだ事項 2 件
+
+どちらも品質ゲートが落ちた状態で停止し、指示を得てから進めた。
+
+#### 1. `bugprone-exception-escape` と ADR-0002 が原理的に両立しない
+
+```
+Converter.cpp: an exception may be thrown in function 'convert' which should not throw exceptions
+  note: 'length_error' may be thrown ... '__emplace_back_slow_path<ConvertWarning>'
+```
+
+ADR-0002 は「`noexcept` を維持し確保失敗時の `std::terminate` を意図的に受け入れる」と
+決めている。この検査はまさにその形を禁止する。発生源は `std::vector::push_back` だが、
+`ConversionOutput::warnings` が `std::vector` である以上（`spec-core.md` §2、ADR-0004）、
+確保を伴う限り必ず反応する。**リンタを黙らせるために承認済みの型定義を歪めることはしなかった。**
+
+**判断（利用者回答）: `.clang-tidy` から除外する。**
+`phases.md` §3 が「除外可」とした 2 種を超える 3 つ目の除外のため、
+`.clang-tidy` / `phases.md` §3 / ADR-0002 の 3 箇所に根拠を書いて相互参照させた。
+抑制コメントは使っていない。
+
+#### 2. ADR-0003 と `IccPolicy` の責務が重複していた
+
+ADR-0003（T0 で私が書いたもの）は `PreserveSupported` を
+「向き + テキスト + **ICC** を保持」と定義していた。しかし `spec-core.md` §2 は
+`MetadataPolicy` と `IccPolicy` を**別フィールド**として持つため、
+`StripAll` + `IccPolicy::Embed` の組み合わせで `IccPolicy` が無意味になる。
+
+**判断（利用者回答）: 直交させ、ADR-0003 を訂正する。**
+`MetadataPolicy` = 向き + テキスト、`IccPolicy` = ICC。互いを上書きしない。
+ADR-0003 に「訂正」節を追加し、T4 で判明した
+「向きの保持は形式により metadata か焼き込みかが変わる」
+「テキストは `QImage::text()` からしか読めない」も併せて記録した。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/core/ConversionSpec.hpp` | `AlphaPolicy` / `MetadataPolicy` / `IccPolicy` / `ConversionSpec` |
+| `src/core/Converter.hpp` | `ConversionOutput` と `convert()` の宣言 |
+| `src/core/Converter.cpp` | `convert()` の実装。非テンプレートで `.cpp` に閉じる |
+| `tests/core/converter_test.cpp` | 実行時テスト 22 本 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `.clang-tidy` | `bugprone-exception-escape` を除外（根拠コメント付き） |
+| `docs/phases.md` §3 | 3 つ目の除外を追記 |
+| `docs/adr/0002-noexcept-and-allocation.md` | 除外の経緯を追記 |
+| `docs/adr/0003-metadata-policy.md` | ICC の責務についての訂正節を追加 |
+| `src/core/CMakeLists.txt` / `tests/CMakeLists.txt` | 新規ファイルの登録 |
+
+**削除**: なし
+
+### 実装の要点
+
+**処理順序を固定した**（決定性のため。入れ替えない）。
+
+```
+空判定 -> 出力形式の妥当性 -> maxPixels 事前判定 -> 復号
+      -> リサイズ -> アルファ -> メタデータ / ICC -> 符号化
+```
+
+- **`maxPixels` は復号前に判定する**（ADR-0002）。`QImageReader::size()` で
+  ヘッダの寸法を見てから `read()` する。復号後の実寸でも再確認する
+  （ヘッダの寸法が信用できない形式があるため）
+- **アルファ合成はプリマルチプライド前提で行わない**（`spec-core.md` §4）。
+  `Format_ARGB32` に正規化 → `flattenColor` で塗ったキャンバスへ
+  `CompositionMode_SourceOver` で描画
+- **`reader.setAutoTransform(false)`** を明示する。true だと向きが画素へ適用され、
+  metadata としての保持も除去も選べなくなる
+- **テキストの除去には「生ビットから QImage を作り直す」手段を使った。**
+  Qt に「全テキストを消す」API が無いため。色空間は明示的に引き継ぐ
+  （`MetadataPolicy` は ICC に関与しないため）
+- `quality` は `[0, 100]` に clamp する。`spec-core.md` §2 は範囲を示すが
+  範囲外に対するエラー値を定義していないため
+
+### 追加・変更したテスト（22 本追加。49 → 71）
+
+**`docs/phases.md` §2.2 の全種別を満たした。**
+
+| 種別 | テスト | 期待値 |
+|---|---|---|
+| エラー | 6 本 | `ConvertError` の**全 6 列挙値**を発生させる |
+| アルファ | 5 本 | `spec-core.md` §4 の**全 5 行** |
+| ラウンドトリップ | 2 本 | PNG→PNG、PNG→BMP が**ピクセル完全一致** |
+| 非可逆 | 1 本 | PNG→JPEG の **PSNR ≧ 35dB**（バイト比較しない） |
+| 決定性 | 1 本 | png / jpeg / bmp / tiff の 4 形式で 2 回変換し**バイト列完全一致** |
+| リサイズ | 1 本 | 64x64 を 32x16 に収めると **16x16**（アスペクト比保持） |
+| メタデータ | 6 本 | テキスト / ICC / 向きの保持と除去（各 2 方向） |
+
+`EncodeFailed` は「能力表が書けると言っているが Qt は書けない」形式を
+`fromCapabilities()` で作って発生させた。環境に依存しない。
+
+アルファの警告は**両方向**を確認している。
+2 行目で `AlphaFlattenedFallback` がちょうど 1 件積まれること、
+**それ以外の行では `warnings` が空であること**（警告が濫発されないこと）。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **71 / 71 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev` | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **71 / 71 pass** |
+
+### 差分規模の申告（停止条件 8）
+
+**T5 の差分は 724 行で、事前に伝えた「400 行に近づく見込み」を超えた。**
+Phase 1 全体としての 400 行超過は承認済みだが、
+タスク単位でも 400 行以内に収める見込みだと述べていた点は外れた。
+内訳は実装 3 ファイルで約 260 行、テスト 1 ファイルで約 330 行、文書が残り。
+**テストが実装より大きいのは §2.2 の種別を全て満たしたためで、削っていない。**
+
+### 推測で埋めた箇所
+
+**なし。** 矛盾 2 件はいずれも自分で判断せず停止して指示を仰いだ。
+
+### 残課題 / 次にやること
+
+1. **T6（`NamingRule`）に着手する。**
+2. その後 T7（`docs/format-matrix.md` のビルド時自動生成）で Phase 1 完了。
+3. Qt API 調査のサブエージェント 2 件の結果がまだ届いていない。
+   届いたら、実装の判断（テキスト除去の手段、ICC の落とし方、`autoTransform` の既定値、
+   `QPainter` を `QCoreApplication` だけで使えること、アルファ合成の数値的正しさ）と
+   食い違いがないか照合する。**食い違いがあれば報告する。**
+4. Windows の実機起動確認は Phase 0 から未了のまま。

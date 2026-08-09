@@ -65,3 +65,33 @@
   （`docs/phases.md` §5.3 の検討事項）。
 - ASan / UBSan のゲートは確保失敗を模擬しない。この方針の検証は上記の
   `maxPixels` 事前判定のテストで代替する。
+
+---
+
+## 追記（2026-08-09、Phase 1 T5）: `bugprone-exception-escape` を除外した
+
+`convert()` を実装したところ、clang-tidy が次を error として報告した。
+
+```
+Converter.cpp: an exception may be thrown in function 'convert' which should not throw exceptions
+  note: unhandled exception of type 'length_error' may be thrown in '__throw_length_error'
+  note: ... '__emplace_back_slow_path<katachi::core::ConvertWarning>'
+```
+
+**この検査は本 ADR の決定と原理的に両立しない。** 本 ADR は「`noexcept` を維持し、
+確保失敗時に `std::terminate` することを意図的に受け入れる」と決めている。
+`bugprone-exception-escape` は、まさにその形（`noexcept` 関数から例外が抜けうること）を
+禁止するために存在する。どちらかしか選べない。
+
+発生源は `std::vector::push_back` だが、**個別の呼び出しの問題ではない。**
+`ConversionOutput::warnings` は `std::vector` であり（`docs/spec-core.md` §2、ADR-0004）、
+確保を伴う限りこの検査は必ず反応する。**リンタを黙らせるために承認済みの型定義を
+歪めることはしない。**
+
+**決定: `.clang-tidy` から `bugprone-exception-escape` を除外する。**
+`docs/phases.md` §3 が「除外可」と明示した 2 種を超える 3 つ目の除外であるため、
+同 §3 にも追記した。抑制コメントは使っていない（`CLAUDE.md` の禁止事項）。
+
+**この除外は「例外安全を気にしない」という意味ではない。** 本 ADR の
+「確保失敗は回復不能として即座に落ちる」という方針を機械検査が表現できないだけである。
+`maxPixels` の事前判定で現実的な入力では到達させない、という前提は変わらない。

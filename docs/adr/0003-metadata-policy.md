@@ -74,3 +74,61 @@ Phase 1 着手時に `doc.qt.io/qt-6.8` で確認した結果は次のとおり�
   Phase 2 の UI で利用者に「すべて保持」と表示することになり、事実と食い違う。
 - Phase 3 で EXIF ライブラリを導入した場合、`PreserveAll` を**別の列挙値として追加**する。
   `PreserveSupported` の意味は変えない（既存の変換結果の再現性を壊さないため）。
+
+---
+
+## 訂正（2026-08-09、Phase 1 T5）: ICC は `MetadataPolicy` の管轄ではない
+
+**上の「決定」節に誤りがあった。** `PreserveSupported` の意味を
+「向き（EXIF orientation）」「テキスト key/value」「**ICC プロファイル**」の 3 つを保持する、
+と書いたが、**ICC を含めたのは誤りである。**
+
+`docs/spec-core.md` §2 の `ConversionSpec` は `MetadataPolicy metadata` と
+`IccPolicy icc` を**別々のフィールドとして**持つ。
+
+```cpp
+MetadataPolicy metadata = MetadataPolicy::PreserveSupported;
+IccPolicy      icc      = IccPolicy::Embed;
+```
+
+`MetadataPolicy` が ICC まで管轄すると、`MetadataPolicy::StripAll` と
+`IccPolicy::Embed` を同時に指定したときにどちらが勝つかが決まらず、
+**`IccPolicy` が無意味になる組み合わせが生まれる。**
+
+### 訂正後の定義
+
+| つまみ | 管轄 |
+|---|---|
+| `MetadataPolicy` | **向き（orientation）とテキスト key/value** |
+| `IccPolicy` | **ICC プロファイルのみ** |
+
+2 つは**直交する**。互いを上書きしない。
+
+- `PreserveSupported` = 向きとテキストを保持する。ICC には関与しない
+- `StripAll` = 向きとテキストを落とす。ICC には関与しない
+- `IccPolicy::Embed` = 入力の色空間を出力へ引き継ぐ
+- `IccPolicy::Strip` = `setColorSpace(QColorSpace{})` で色空間を落とす
+
+`docs/spec-core.md` §2 が両方を別フィールドとして定義している以上、
+これが唯一矛盾のない読み方である。
+
+### 向きの保持には形式差があること（T4 の実測で判明）
+
+`PreserveSupported` の「向きの保持」は、出力形式によって手段が変わる。
+
+| 出力形式 | 挙動 |
+|---|---|
+| TIFF 等（transformation を保存できる） | **metadata として保持される** |
+| JPEG | **metadata は書かれず、Qt が回転をピクセルへ焼き込む** |
+
+どちらも見た目の向きは保たれるが、**同じ「保持」ではない。**
+JPEG へ出力した場合、出力ファイルに向き metadata は存在せず、
+画素が回転済みになる。これは `QImageWriter::setTransformation()` の
+"If transformation metadata is not supported by the image format,
+the transform is applied before writing" に対応する Qt の仕様である。
+
+### テキストの読み取り経路（T4 の実測で判明）
+
+PNG のテキストは `QImageReader::text()` / `textKeys()` では取れない。
+**デコード後の `QImage::text()` からしか読めない。**
+実装・テストともこの経路を使うこと。

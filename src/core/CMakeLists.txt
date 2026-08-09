@@ -8,6 +8,9 @@ add_library(
     katachi_core STATIC
     CapabilityTable.cpp
     CapabilityTable.hpp
+    ConversionSpec.hpp
+    Converter.cpp
+    Converter.hpp
     Concepts.hpp
     ConvertError.hpp
     FormatId.hpp
