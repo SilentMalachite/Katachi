@@ -29,6 +29,7 @@ katachi/
 │   └── app/           # 依存: Qt6::Widgets
 │       ├── MainWindow / JobTableModel / SettingsPanel / main.cpp
 ├── tests/{core,io,fixtures}/
+├── tools/format_matrix.cpp          # docs/format-matrix.md の生成器（ビルド時に実行）
 ├── CLAUDE.md                       # リポジトリ直下（常時読み込み）
 ├── docs/                           # 参照文書は全てここ
 │   ├── spec-core.md / cpp-conventions.md / phases.md / agent-protocol.md

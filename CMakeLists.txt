@@ -58,3 +58,5 @@ include(cmake/QualityGates.cmake)
 add_subdirectory(src/core)
 add_subdirectory(src/app)
 add_subdirectory(tests)
+
+include(cmake/FormatMatrix.cmake)

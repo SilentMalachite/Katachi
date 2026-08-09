@@ -1233,3 +1233,125 @@ core に新しい `.cpp` が入ったため、まとめて指摘が出た。す�
    書けるようになった。** 表示用の文言を core に書いてしまう余地が生まれたが、
    それは `CLAUDE.md` の「core に UI 文言を置かない」という設計方針で担保する（機械検査は無い）。
 3. Windows の実機起動確認は Phase 0 から未了のまま。
+
+---
+
+## 2026-08-09 — T7 完了（`docs/format-matrix.md` の自動生成）。Phase 1 のローカル作業完了
+
+### 実施内容
+
+能力表から `docs/format-matrix.md` をビルド時に生成する仕組みを作った。
+これで T0〜T7 が揃い、Phase 1 のローカル作業は完了。
+
+### 計画に無かった追加（申告）
+
+**`tools/` ディレクトリを新設した。** `docs/spec-core.md` §1 のディレクトリ構成に
+`tools/` は無かった。承認いただいた計画では「`tools/` 配下 + CMake ターゲット」と
+書いていたが、§1 の木を更新する話は書いていなかった。§1 に 1 行追記した。
+
+生成器の置き場所として `src/app`（Widgets に依存してしまう）も
+`tests/`（テストではない）も適さないため、独立させた。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `tools/format_matrix.cpp` | 生成器。表が空 / PNG が無い場合は非ゼロ終了する |
+| `cmake/FormatMatrix.cmake` | 生成ターゲットとテストへの配線 |
+| `tests/core/format_matrix_test.cpp` | 生成物の検証 5 本 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `CMakeLists.txt` | `include(cmake/FormatMatrix.cmake)` |
+| `tests/CMakeLists.txt` | `format_matrix_test.cpp` を追加 |
+| `docs/spec-core.md` §1 | `tools/format_matrix.cpp` を木に追記 |
+
+**削除**: なし
+
+### 設計上の判断
+
+**生成物はコミットしない**（`.gitignore` に登録済み。Phase 0 から）。
+能力表は実行環境の Qt プラグイン構成で決まるため、コミットすると
+「誰かの環境の一覧」が正になってしまう。`git ls-files` で 0 件を確認済み。
+
+**`CapabilityTable` に全項目を返す取得子を足さなかった。** `docs/spec-core.md` §3 は
+`find()` と `encodable()` のみを定めている。読み込み専用の形式も一覧に載せる必要が
+あるため、生成器側で Qt の報告する名前を正規化・重複除去してから `find()` で引いた。
+T3 のテストと同じ手口。**仕様に無い API を足さずに済ませた。**
+
+**生成器は自分で中身を検証する。** 表が空、あるいは PNG が能力表に無い場合は
+非ゼロ終了してビルドを止める。中身の無い一覧を黙って出力しない。
+
+### 生成結果（ローカル macOS 14 / arm64、Qt 6.11.1）
+
+22 形式が並んだ。ADR-0006 の別名統合が効いていることが一覧からも見える。
+
+| 確認点 | 結果 |
+|---|---|
+| `jpeg` の行の拡張子 | `jfif, jpeg, jpg`（3 別名が 1 行に統合） |
+| `tiff` の行の拡張子 | `tif, tiff` |
+| `jpg` / `jfif` 単独の行 | **無い**（統合済み） |
+| 読み込み専用（`gif` / `pdf` / `svg` / `svgz` / `tga`） | 3 つの実測列がすべて `-` |
+| `png` | 読み書き・アルファ・品質・可逆すべて `o` |
+
+`-` が「その性質が無い」ではなく「判定していない」を意味することを本文に明記した（ADR-0007）。
+
+### 追加・変更したテスト（5 本追加。88 → 93）
+
+| テスト | 期待値 |
+|---|---|
+| `the format matrix is generated and not empty` | ファイルが存在し、表の見出し行を含む |
+| `the format matrix says it is generated` | 「ビルド時に自動生成」と生成元パスが本文にある |
+| `the format matrix lists png as readable and writable` | `png` の行が読み書きとも `o` |
+| `the format matrix shows merged alias extensions` | `jpeg` に別名が並び、**`jpg` / `jfif` 単独の行が無い** |
+| `the format matrix explains what a dash means` | 「判定していない」の説明が本文にある |
+
+生成器自身もビルド時に検証するが、こちらは「生成物が実際に置かれ、内容を反映しているか」を見る。
+落ちたときの切り分けが変わる。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **93 / 93 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev` | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **93 / 93 pass** |
+
+### Phase 1 受け入れ基準（`docs/phases.md` §4）
+
+| 項目 | 状態 |
+|---|---|
+| `convert()` が純粋関数として実装され、ファイル I/O・時刻・グローバル状態に触れていない | **達成**（`QBuffer` のみ。不変条件スキャナと依存方向で担保） |
+| `docs/adr/0002-noexcept-and-allocation.md` に `noexcept` 判断が記録されている | **達成**（`bugprone-exception-escape` 除外の経緯も追記済み） |
+| `CapabilityTable::buildFromQt()` が実行時に能力表を生成する | **達成** |
+| §2.2 の全テスト種別が存在し、green | **達成**（ラウンドトリップ / 非可逆 PSNR / 決定性 / アルファ全行 / エラー全列挙 / 能力表 / 不変条件 / 依存方向 / concept 適合） |
+| `ConvertError` の全列挙値にテストがある | **達成**（6 / 6） |
+| 不変条件スキャナ 6 種が引き続き green | **達成**（7 検査 + 検出確認 7 = 14 テスト） |
+| `src/core/Concepts.hpp` に core 層の concept が集約され、肯定・否定両方の `static_assert` がある | **達成**（`ResultValue` / `ResultError` / `CapabilitySource` の 3 つとも両方あり） |
+| `Converter.hpp` がテンプレートになっていない（実装が `.cpp` に閉じている） | **達成**（`grep template` が 0 件） |
+| 決定性テストが green | **達成**（png / jpeg / bmp / tiff の 4 形式。除外形式は無し） |
+| `docs/format-matrix.md` がビルド時に自動生成される | **達成** |
+
+**10 項目すべて達成。CI では未検証**（このブランチは未 push）。
+
+### 推測で埋めた箇所
+
+**なし。**
+
+### 残課題 / 次にやること
+
+1. **`phase1` ブランチを push し、CI（macOS / Windows）で確認する。** 未実施。
+   Qt 6.8 と 6.11 の差、Windows 固有の挙動がここで出る可能性がある。
+   特に **T3 の能力表実測と T4 のフィクスチャ生成は環境依存**であり、
+   Windows で異なる結果になれば関連テストが落ちうる。
+2. その後 PR を作成して `main` へマージ。
+3. Windows の実機起動確認は Phase 0 から未了のまま。
+4. Phase 2 着手時の宿題: `docs/phases.md` §5.3（バッチ実行時のメモリ上限）、
+   衝突ポリシーの io 層での実装、ICO の内部キー `_q_icoOrigDepth` の扱い。
