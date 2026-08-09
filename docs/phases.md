@@ -20,12 +20,36 @@
 
 | 依存 | 入手 | 備考 |
 |---|---|---|
-| Qt | ローカルは公式インストーラ、CI は `aqtinstall` | **CI は 6.8 系 LTS に固定する。** ローカルが 6.11 でも CI は下限に合わせる。6.8 以降に入った API を無自覚に使う事故を CI で検出するため |
+| Qt | ローカルは公式インストーラ、CI は `aqtinstall` | **CI は 6.8 系 LTS に固定する。** ローカルが 6.11 でも CI は下限に合わせる。6.8 以降に入った API を無自覚に使う事故を CI で検出するため。**モジュール指定は下記 1.5.1 を必ず読む** |
 | Catch2 v3 | `FetchContent` + **固定タグ** + `FIND_PACKAGE_ARGS`（システム版があれば優先） | 両 OS の CI で追加セットアップが不要。バージョンはタグで固定し、ブランチ名やレンジで追跡しない |
 | 追加コーデック | Phase 3 で決定（`docs/licenses.md` の更新が先） | オプショナル依存。無くてもビルド・起動できること |
 
 > **「ネットワーク通信禁止」はアプリ実行時の制約であり、ビルド時の依存取得は対象外。**
 > ただし再現性のため、`FetchContent` のタグは必ず固定する。
+
+### 1.5.1 Qt のモジュール指定（CI で必ず明示する）
+
+**画像フォーマットのプラグインは 2 つのモジュールに分かれている。**
+
+| モジュール | 含まれるプラグイン（macOS / Windows 実測） |
+|---|---|
+| `qtbase` | png（組込）/ `qjpeg` / `qgif` / `qico` / `qpdf` / `qsvg` |
+| **`qtimageformats`（アドオン）** | **`qtiff` / `qwebp` / `qjp2` / `qicns` / `qtga` / `qwbmp` / `qmacheif`** |
+
+**`qtimageformats` は既定ではインストールされない。**
+CI では `install-qt-action` の `modules: qtimageformats` で明示する。
+
+> **入れ忘れると TIFF / WebP などが能力表から丸ごと消える。**
+> Phase 1 の初回 CI で実際に起きた。4 ジョブすべてが
+> 「`oriented.tiff` の書き出しに失敗（Unsupported image format）」で落ちた。
+> ローカルは公式インストーラの全部入りで `qtimageformats` を含むため、
+> **ローカルでは green、CI だけ落ちるという形で現れる。**
+
+**能力表は実行時に生成されるため、この欠落はビルドエラーにならない。**
+「対応形式が減る」という形で静かに現れる。だからこそ CI で明示する。
+
+Phase 4 で `qtimageformats` を同梱する場合、その中の第三者ライブラリ
+（libtiff / libwebp 等）のライセンス文も必要になる（`docs/licenses.md` §4）。
 
 ---
 
