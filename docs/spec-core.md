@@ -78,6 +78,11 @@ struct FormatId {
 `QString` ⇄ `FormatId` の変換関数は `FormatId.hpp` にのみ置く。
 **ここが「フォーマット名の文字列リテラル禁止」の唯一の例外である。**
 
+`formatIdFromString()` は **①前後の空白除去 ②小文字化 ③別名の代表名への吸収**（`jpg` / `jfif` → `jpeg`、`tif` → `tiff`）を行う（**ADR-0006**）。
+別名を畳む基準は「Qt が同一の MIME タイプを報告すること」で、`heic` / `heif` のように MIME が異なるものは畳まない。
+**`CapabilityTable` も同じ関数で正規化する。** 表の鍵と問い合わせの鍵が必ず同じ経路を通るため、片側だけ畳まれて引けなくなることはない。
+`buildFromQt()` は正規化後に同一 `FormatId` となった項目を 1 件へ統合し、`extensions` は和集合を取る。
+
 ```cpp
 enum class ConvertError {
     EmptyInput, DecodeFailed, UnsupportedTarget, EncodeFailed,

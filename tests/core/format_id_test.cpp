@@ -42,6 +42,36 @@ TEST_CASE("formatIdFromString trims surrounding whitespace", "[core][formatid]")
             formatIdFromString(QStringLiteral("png")));
 }
 
+TEST_CASE("formatIdFromString folds jpeg aliases onto one id", "[core][formatid]") {
+    // Qt はいずれも MIME image/jpeg を報告する（ADR-0006）。
+    const FormatId canonical = formatIdFromString(QStringLiteral("jpeg"));
+
+    REQUIRE(formatIdFromString(QStringLiteral("jpg")) == canonical);
+    REQUIRE(formatIdFromString(QStringLiteral("JPG")) == canonical);
+    REQUIRE(formatIdFromString(QStringLiteral("jfif")) == canonical);
+    REQUIRE(formatIdToString(canonical) == QStringLiteral("jpeg"));
+}
+
+TEST_CASE("formatIdFromString folds tiff aliases onto one id", "[core][formatid]") {
+    const FormatId canonical = formatIdFromString(QStringLiteral("tiff"));
+
+    REQUIRE(formatIdFromString(QStringLiteral("tif")) == canonical);
+    REQUIRE(formatIdFromString(QStringLiteral("  TIF ")) == canonical);
+    REQUIRE(formatIdToString(canonical) == QStringLiteral("tiff"));
+}
+
+TEST_CASE("formatIdFromString keeps heic and heif apart", "[core][formatid]") {
+    // MIME が image/heic と image/heif で異なるため畳んではならない（ADR-0006）。
+    REQUIRE_FALSE(formatIdFromString(QStringLiteral("heic")) ==
+                  formatIdFromString(QStringLiteral("heif")));
+}
+
+TEST_CASE("formatIdFromString leaves unrelated names untouched", "[core][formatid]") {
+    REQUIRE(formatIdToString(formatIdFromString(QStringLiteral("png"))) == QStringLiteral("png"));
+    REQUIRE(formatIdToString(formatIdFromString(QStringLiteral("webp"))) == QStringLiteral("webp"));
+    REQUIRE(formatIdToString(formatIdFromString(QStringLiteral("bmp"))) == QStringLiteral("bmp"));
+}
+
 TEST_CASE("FormatId distinguishes different names", "[core][formatid]") {
     REQUIRE_FALSE(formatIdFromString(QStringLiteral("png")) ==
                   formatIdFromString(QStringLiteral("bmp")));

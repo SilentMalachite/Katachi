@@ -453,3 +453,109 @@ core はまだ `.cpp` を持たず、`src/app` の 2 本は core ヘッダを in
 3. `formatIdFromString()` の正規化（小文字化・trim）は指示書に根拠が無い判断。
    不要であれば指示を仰いで戻す。
 4. Windows の実機起動確認は Phase 0 から未了のまま。
+
+---
+
+## 2026-08-09 — T2 追補（`FormatId` の正規化を確定し、別名の吸収を追加）
+
+### 実施内容
+
+前エントリで「指示書に根拠が無い判断」として報告した `formatIdFromString()` の正規化について、
+**正規化を行うこと、および別名を吸収することの指示を得た。** 決定として確定させ、
+別名の吸収を追加した。
+
+### 判断の根拠にした実測（Qt 6.11.1 / macOS 14 arm64）
+
+別名をどう選ぶかを推測しないため、Qt が実際に報告する名前と MIME タイプを測った。
+
+```
+READ : bmp cur gif heic heif icns ico jfif jp2 jpeg jpg pbm pdf pgm png ppm
+       svg svgz tga tif tiff wbmp webp xbm xpm
+WRITE: bmp cur heic heif icns ico jfif jp2 jpeg jpg pbm pgm png ppm tif tiff
+       wbmp webp xbm xpm
+MIME : ... image/jpeg ... image/tiff ... image/heic image/heif ...
+```
+
+**Qt は `jpeg` / `jpg` / `jfif` を別々の名前として報告するが、MIME はいずれも `image/jpeg`。**
+`tif` / `tiff` も同じく `image/tiff`。
+一方 `heic` と `heif` は `image/heic` と `image/heif` で **別の MIME**。
+
+**そこで「Qt が同一の MIME タイプを報告すること」を、別名を畳む基準に据えた。**
+名前の見た目や一般的な慣習では判断しない。
+
+| 別名 | 代表名 | 根拠 |
+|---|---|---|
+| `jpg` | `jpeg` | ともに `image/jpeg` |
+| `jfif` | `jpeg` | ともに `image/jpeg` |
+| `tif` | `tiff` | ともに `image/tiff` |
+
+**畳まなかったもの（意図的）**: `heic` / `heif`、`svg` / `svgz`。いずれも MIME が異なる。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `docs/adr/0006-format-id-normalization.md` | 正規化の内容、別名を畳む基準、T3 への帰結 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `src/core/FormatId.hpp` | 別名表を追加。**「フォーマット名の文字列リテラル」例外枠を実際に使う唯一の箇所になった** |
+| `docs/spec-core.md` §2.1 | 正規化の 3 段階と、`buildFromQt()` が正規化後の重複を統合すべきことを追記 |
+| `tests/core/format_id_test.cpp` | 別名のテスト 4 本を追加 |
+
+**削除**: なし
+
+### T3 への帰結（見落とすと `find()` が不定になる）
+
+**`CapabilityTable::buildFromQt()` は正規化後の重複を畳まなければならない。**
+Qt は `jpeg` / `jpg` / `jfif` を別々に報告するため、正規化すると 3 件が同じ `FormatId` になる。
+**同一 `FormatId` の `FormatCapability` は 1 件へ統合し、`extensions` は和集合を取る。**
+これを怠ると `find()` がどれを返すか不定になる。ADR-0006 と `spec-core.md` §2.1 に記載済み。
+
+また `CapabilityTable` も**同じ `formatIdFromString()` で正規化する**。
+表の鍵と問い合わせの鍵が必ず同じ経路を通るため、片側だけ畳まれて引けなくなることはない。
+
+### 追加・変更したテスト（4 本追加。28 → 32）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `formatIdFromString folds jpeg aliases onto one id` | `jpg` / `JPG` / `jfif` が `jpeg` と同一。代表名の文字列が `"jpeg"` | pass |
+| `formatIdFromString folds tiff aliases onto one id` | `tif` / `"  TIF "` が `tiff` と同一。代表名の文字列が `"tiff"` | pass |
+| `formatIdFromString keeps heic and heif apart` | `heic` と `heif` が**等しくない** | pass |
+| `formatIdFromString leaves unrelated names untouched` | `png` / `webp` / `bmp` が素通り | pass |
+
+否定側（畳んではいけないものを畳んでいないこと）のテストを併せて置いた。
+別名表が広すぎる事故を検出するため。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **32 / 32 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev` | exit 0 |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **32 / 32 pass** |
+
+不変条件スキャナ 7 種を個別にも実行し、全て ok を確認した。
+**別名表のリテラルは `FormatId.hpp` にあるため INV3A に検出されない**（除外が意図どおり働いている）。
+
+### 推測で埋めた箇所
+
+**なし。** 別名の選定は Qt の MIME タイプの実測に基づく。
+`QStringLiteral` を使わず `QStringView(u"...")` としたのは、
+`QStringLiteral` の定義ヘッダが Qt 6.8 と 6.11 で異なり、
+`misc-include-cleaner` が CI でのみ違反を出した前例（Phase 0）を踏まえたもの。
+
+### 残課題 / 次にやること
+
+1. **T3（`CapabilityTable` と `CapabilitySource` concept）に着手する。**
+   上記「T3 への帰結」の重複統合を必ず実装する。
+2. T3 で `katachi_core` を `INTERFACE` から `STATIC` へ変更する。
+3. T3 で clang-tidy ゲートが core ヘッダに届くようになる。新たな指摘が出ないか確認する。
+4. Windows の実機起動確認は Phase 0 から未了のまま。

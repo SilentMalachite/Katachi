@@ -8,8 +8,7 @@
 //
 // **このファイルは「フォーマット名の文字列リテラル禁止」の唯一の例外である**
 // （docs/spec-core.md §3。不変条件スキャナ INV3A はこのファイルだけを除外する）。
-// ただし現時点で例外を必要とする記述は無い。変換関数は名前を知らずに包み直すだけで、
-// 特定のフォーマット名を書いていない。例外枠を使う場合はここに書く。
+// 下の別名表がその例外枠を使う唯一の箇所であり、ここ以外に増やさない。
 
 #include <QString>
 #include <QStringView>
@@ -22,16 +21,37 @@ struct FormatId {
     friend bool operator==(const FormatId&, const FormatId&) = default;
 };
 
-// 任意の文字列から識別子を作る。
+// 任意の文字列から識別子を作る。正規化の内容は ADR-0006。
 //
-// 前後の空白を落とし、小文字へ畳む。Qt が返す形式名は小文字だが、
-// 呼び出し側が拡張子や利用者入力から作る場合は大文字が混じりうる。
-// ここで正規化しないと、同じ形式を指す FormatId が operator== で別物になり、
+// 1. 前後の空白を落とす
+// 2. 小文字へ畳む — Qt が返す形式名は小文字だが、呼び出し側が拡張子や
+//    利用者入力から作る場合は大文字が混じりうる
+// 3. 別名を代表名へ畳む — 下記
+//
+// 正規化しないと、同じ形式を指す FormatId が operator== で別物になり、
 // CapabilityTable::find() が取りこぼす。
+//
+// 別名を畳む基準は「Qt が同一の MIME タイプを報告すること」。
+// 実測（Qt 6.11.1 / macOS）では jpeg・jpg・jfif がいずれも image/jpeg、
+// tif・tiff がいずれも image/tiff を返す。
+// heic と heif は image/heic と image/heif で別の MIME のため畳まない。
+//
+// 代表名の側（jpeg / tiff）は Qt の対応形式一覧に必ず含まれることを実測で確認済み。
+// また CapabilityTable も同じこの関数で正規化するため、表の鍵と問い合わせの鍵が
+// 常に一致する（片側だけ畳まれて引けなくなることはない）。
 //
 // noexcept と確保失敗の扱いは ADR-0002 に従う。
 [[nodiscard]] inline FormatId formatIdFromString(QStringView name) noexcept {
-    return FormatId{name.trimmed().toString().toLower()};
+    const QString folded = name.trimmed().toString().toLower();
+
+    if (folded == QStringView(u"jpg") || folded == QStringView(u"jfif")) {
+        return FormatId{QStringView(u"jpeg").toString()};
+    }
+    if (folded == QStringView(u"tif")) {
+        return FormatId{QStringView(u"tiff").toString()};
+    }
+
+    return FormatId{folded};
 }
 
 // 引数名を id にしないのは clang-tidy の readability-identifier-length
