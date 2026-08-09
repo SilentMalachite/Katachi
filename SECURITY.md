@@ -4,12 +4,15 @@
 
 **脆弱性は公開の Issue に書かないでください。**
 
-**連絡先: silentmalachite@gmail.com**
+GitHub の **Private vulnerability reporting** を使ってください。有効化済みです。
 
-件名に `[Katachi security]` を入れてください。
+**→ [脆弱性を報告する](https://github.com/SilentMalachite/Katachi/security/advisories/new)**
 
-> GitHub の **Private vulnerability reporting** は現在このリポジトリで有効になっていません。
-> 有効化された場合は、Security タブの **Report a vulnerability** を優先してください。
+リポジトリの **Security** タブ → **Report a vulnerability** からも同じ画面に入れます。
+GitHub アカウントがあれば誰でも使えます。**やり取りは公開されません。**
+
+修正が用意できたあと、報告者の同意を得てから advisory を公開します。
+**公開時に報告者としてクレジットされることを希望するかどうか、報告時に書いてください。**
 
 報告に含めてほしい情報。
 
