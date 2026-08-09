@@ -16,7 +16,8 @@ add_library(
     FileSource.cpp
     FileSource.hpp
     IoConcepts.hpp
-    IoError.hpp)
+    IoError.hpp
+    JobRunner.hpp)
 
 target_include_directories(katachi_io PUBLIC "${PROJECT_SOURCE_DIR}/src")
 

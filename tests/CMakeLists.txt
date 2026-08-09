@@ -39,7 +39,8 @@ add_executable(katachi_tests main.cpp core/qt_image_plugins_smoke.cpp core/resul
                             core/format_matrix_test.cpp
                             io/io_concepts_test.cpp
                             io/file_io_test.cpp
-                            io/collision_policy_test.cpp)
+                            io/collision_policy_test.cpp
+                            io/job_runner_test.cpp)
 
 add_dependencies(katachi_tests katachi_fixtures)
 

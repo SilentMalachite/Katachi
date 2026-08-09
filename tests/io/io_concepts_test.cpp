@@ -9,6 +9,7 @@
 #include "core/Result.hpp"
 #include "io/IoConcepts.hpp"
 #include "io/IoError.hpp"
+#include "test_doubles.hpp"
 
 #include <QByteArray>
 
@@ -16,8 +17,6 @@
 
 #include <array>
 #include <cstddef>
-#include <utility>
-#include <variant>
 
 namespace {
 
@@ -26,64 +25,10 @@ using katachi::io::ByteSink;
 using katachi::io::ByteSource;
 using katachi::io::IoError;
 using katachi::io::ProgressSink;
-
-// ファイルシステムに触れない入力。JobRunner を T4 でテストするときにも使う。
-class MemorySource {
-public:
-    explicit MemorySource(QByteArray bytes) : bytes_(std::move(bytes)) {}
-
-    [[nodiscard]] Result<QByteArray, IoError> read() {
-        return Result<QByteArray, IoError>::ok(bytes_);
-    }
-
-private:
-    QByteArray bytes_;
-};
-
-// ファイルシステムに触れない出力。
-class MemorySink {
-public:
-    [[nodiscard]] Result<std::monostate, IoError> write(const QByteArray& bytes) {
-        written_ = bytes;
-        return Result<std::monostate, IoError>::ok(std::monostate{});
-    }
-
-    [[nodiscard]] const QByteArray& written() const noexcept { return written_; }
-
-private:
-    QByteArray written_;
-};
-
-// Qt のイベントループに触れない進捗とキャンセル。
-class FakeProgress {
-public:
-    void onProgress(int done, int total) {
-        done_ = done;
-        total_ = total;
-    }
-
-    [[nodiscard]] bool isCancelled() const noexcept { return cancelled_; }
-
-    void cancel() noexcept { cancelled_ = true; }
-
-    [[nodiscard]] int done() const noexcept { return done_; }
-
-    [[nodiscard]] int total() const noexcept { return total_; }
-
-private:
-    int done_ = 0;
-    int total_ = 0;
-    bool cancelled_ = false;
-};
-
-// isCancelled() が noexcept でない型。concept の noexcept 要求が実際に効いていることを
-// 否定側で確かめるために置く（docs/cpp-conventions.md §2.4）。
-class NoexceptlessProgress {
-public:
-    void onProgress(int, int) {}
-
-    [[nodiscard]] bool isCancelled() const { return false; }
-};
+using katachi::test::FakeProgress;
+using katachi::test::MemorySink;
+using katachi::test::MemorySource;
+using katachi::test::NoexceptlessProgress;
 
 // 肯定側。
 static_assert(ByteSource<MemorySource>);
@@ -127,6 +72,7 @@ TEST_CASE("the test doubles carry bytes through the io concepts", "[io]") {
     REQUIRE(progress.isCancelled());
 
     progress.onProgress(3, 10);
-    REQUIRE(progress.done() == 3);
-    REQUIRE(progress.total() == 10);
+    REQUIRE(progress.calls().size() == 1);
+    REQUIRE(progress.calls().front().first == 3);
+    REQUIRE(progress.calls().front().second == 10);
 }

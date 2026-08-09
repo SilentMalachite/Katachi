@@ -1179,3 +1179,140 @@ T3 で報告した「`Rename` が並列実行で競合する」件について�
 2. `indexed.png` を `fixtures_test.cpp` の大きさ検査へ足すかどうかの判断（T1.5 で報告）。
 3. `.serena/` は未追跡のまま。
 4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
+
+---
+
+## 2026-08-09 — T4 完了（`JobRunner<Sink, Progress>`）
+
+### 実施内容
+
+1 件の変換ジョブを実行するテンプレートを実装した。**ヘッダのみで `.cpp` を作っていない。**
+TDD の順序を守り、実装前に意図した理由での失敗
+（`'io/JobRunner.hpp' file not found`）を確認した。
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/io/JobRunner.hpp` | `JobStatus` / `JobFailure` / `JobItem` / `JobOutcome` / `BatchCounter` / `outputFileNameFor()` / `JobRunner<Sink, Progress>` |
+| `tests/io/test_doubles.hpp` | テストダブルの共有ヘッダ（T1 の 3 種を移し、`FailingSink` を追加） |
+| `tests/io/job_runner_test.cpp` | 実行時テスト 8 本 |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `src/io/CMakeLists.txt` | `JobRunner.hpp` を追加 |
+| `tests/io/io_concepts_test.cpp` | ダブルの定義を共有ヘッダへ移動し、`FakeProgress` の記録方法の変更に追随 |
+| `tests/CMakeLists.txt` | `io/job_runner_test.cpp` を追加 |
+
+**削除**: なし
+
+### 承認された計画からの変更（申告。重要）
+
+**命名を `runOne()` の中から外へ出した。**
+
+計画では `runOne records a naming failure with its reason`（空パターンで
+`NamingError::EmptyPattern`）を T4 のテストに挙げていた。実装に入って**設計の矛盾に気づいた。**
+
+- `runOne(Source&, Sink&, const JobItem&)` の `Sink` は**呼び出し側が構築済み**である
+- `FileSink` は「ディレクトリ + ファイル名 + ポリシー」で構築される（ADR-0009）
+- つまり**出力ファイル名は `runOne()` を呼ぶ前に決まっていなければならない**
+- したがって `runOne()` の中で名前を決めても、その名前を使う先が無い
+
+さらに ADR-0009 の追補（案 A）で、**名前の決定と予約は Bridge がロックの中で行う**と決めた。
+命名は `runOne()` の外に置くのが正しい。
+
+**対処: 純粋関数 `outputFileNameFor(const JobItem&)` を `JobRunner.hpp` に置き、
+命名のテストをそちらへ移した。** 期待値（空パターン → `NamingError::EmptyPattern`）は変えていない。
+正常系のテストも 1 本足した（`{name}_{index:03}.{ext}` → `photo_001.png`）。
+
+**テストダブルを共有ヘッダへ切り出した。** T1 で `tests/io/io_concepts_test.cpp` の
+無名名前空間に置いたが、T4 でも使うため `tests/io/test_doubles.hpp` へ移した
+（T1 のコメントに「T4 でも使う」と書いていたもの）。`FailingSink` を追加し、
+`FakeProgress` は呼ばれた `(done, total)` の列を記録するようにした。
+
+### 設計上の判断
+
+**`JobItem` も `JobOutcome` もバイト列を持たない。** `QFuture` は全件の結果を保持するため、
+出力バイト列を載せると 1000 件分がメモリに残る（ADR-0008）。
+入力は `ByteSource` から必要になった時点で読む。
+
+**`JobOutcome::status` の既定は `Failed`。** 入れ忘れが「成功」に見えないようにするため。
+
+**`JobOutcome::outputPath` は呼び出し側（T6 の Bridge）が入れる。**
+`FileSink::resolvedPath()` は `ByteSink` concept の外にあり（ADR-0009）、
+テンプレートの `runOne()` からは触れない。案 A では Bridge が名前を決めるため、
+Bridge は自分が決めたパスをそのまま入れられる。
+
+**キャンセルされた件は進捗に数えない。** 処理していないため。
+失敗とスキップは数える（1 件終わったことに変わりはない）。
+
+**メンバは参照ではなくポインタ。** `cppcoreguidelines-avoid-const-or-ref-data-members` による。
+いずれも非所有で、寿命は呼び出し側が保証する。
+
+### 提案: 出力の拡張子が `.jpeg` になる（実装していない）
+
+`outputFileNameFor()` は拡張子を `FormatId` の代表名から作る。
+**文字列リテラルを書かないという原則には合っているが、`jpeg` の代表名は `jpeg` のため
+出力が `photo.jpeg` になる**（ADR-0006 で `jpg` / `jfif` を `jpeg` へ畳んだため）。
+
+`.jpg` を期待する利用者は多いと思われる。ただし**別名のうちどれを選ぶかの根拠が指示書に無い。**
+`CapabilityTable::extensions` は別名の和集合（昇順）であり、そこから 1 つ選ぶ根拠も無い。
+
+**T8（`SettingsPanel`）で「拡張子の選択」を設けるかどうか、判断を仰ぐ。**
+現状は代表名のままとし、勝手に決めていない。
+
+### 追加・変更したテスト（8 本追加。114 → 122）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `runOne converts and writes through the sink` | Sink が受け取ったバイト列が `core::convert()` の出力と**完全一致** | pass |
+| `runOne reports progress once per item` | 10 件流すと `onProgress` が **10 回**、`done` が 1..10 の昇順、`total` は 10 で据え置き | pass |
+| `runOne skips work when already cancelled` | 状態 `Cancelled`。**Sink が呼ばれず、進捗も数えない** | pass |
+| `runOne records a decode failure with its reason` | 状態 `Failed`、理由 `ConvertError::DecodeFailed`。Sink は呼ばれない。**進捗は 1 件進む** | pass |
+| `runOne records a sink failure with its reason` | 状態 `Failed`、理由 `IoError::WriteFailed` | pass |
+| `runOne carries the converter warnings` | アルファ有り → jpeg / `Preserve` で `AlphaFlattenedFallback` が **1 件** | pass |
+| `outputFileNameFor builds the name from the pattern and the target format` | `{name}_{index:03}.{ext}` → **`photo_001.png`** | pass |
+| `outputFileNameFor reports a naming failure with its reason` | 空パターンで `NamingError::EmptyPattern` | pass |
+
+**テスト自身はファイルを 1 つも読み書きしない。** 入力画像はその場でメモリ上に符号化して作る。
+Qt のイベントループも使わない。`docs/cpp-conventions.md` §2.3 が
+`JobRunner` をテンプレートにした理由を、テストの形で満たしている。
+
+### 完了条件の確認
+
+| 条件 | 結果 |
+|---|---|
+| `JobRunner.hpp` に `.cpp` が無い | **確認済み**（`src/io/` に `JobRunner.cpp` は存在しない） |
+| テストが Qt のイベントループもファイルも使わずに green | **達成**（8 本とも） |
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev` | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **122 / 122 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev`（対象 8 ファイル） | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **122 / 122 pass** |
+
+**clang-tidy はまだ `JobRunner.hpp` に届いていない。** ヘッダのみで、`src/*.cpp` の
+どれからも include されていないため。**T6 で `JobRunnerBridge.cpp` が include すると届く。
+届いた結果として新たな指摘が出ないか確認する**（T2 で io に届いたときと同じ）。
+
+### 推測で埋めた箇所
+
+**なし。** 命名を外へ出す判断は、`FileSink` の構築引数（T3 で実装済み）と
+ADR-0009 追補から導いた。
+
+### 残課題 / 次にやること
+
+1. **T5（`MemoryBudget`）に着手する。** ADR-0008 のバイト予算。
+2. 上記「出力の拡張子が `.jpeg` になる」件の判断（T8 の範囲）。
+3. `indexed.png` を `fixtures_test.cpp` の大きさ検査へ足すかどうかの判断（T1.5 で報告）。
+4. `.serena/` は未追跡のまま。
+5. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。
