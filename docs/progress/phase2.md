@@ -547,3 +547,172 @@ ADR を書くにあたって `src/core/Converter.cpp` を実際に読み直し�
    **T0 のコミットには含めていない。** `.gitignore` に足すかどうかは別途判断を仰ぐ。
 4. `phase1` ブランチの削除が未実施（Phase 1 の残課題）。
 5. Windows の実機起動確認は Phase 0 から未了のまま。
+
+---
+
+## 2026-08-09 — T1 完了（`src/io` の土台と不変条件スキャナ INV7）
+
+### 実施内容
+
+`src/io` を新設し、io 層のエラー列挙と concept 3 種を実装した。
+併せて承認済みの INV7（`src/io` から `QtWidgets` を include しない）を追加した。
+TDD の順序（失敗するテスト → 意図した理由の確認 → 実装）を守った。
+
+### TDD の経過
+
+1. `tests/io/io_concepts_test.cpp` を先に書き、`tests/CMakeLists.txt` に配線してビルド
+2. **意図した理由での失敗を確認**
+
+```
+tests/io/io_concepts_test.cpp:10:10: fatal error: 'io/IoConcepts.hpp' file not found
+```
+
+   `katachi_core` が `${PROJECT_SOURCE_DIR}/src` を PUBLIC な include ディレクトリとして
+   公開しているため、`katachi_io` が存在しない状態でも**「ヘッダが無い」という
+   意図どおりの理由**で落ちる（CMake の構成エラーにはならない）。
+3. `IoError.hpp` / `IoConcepts.hpp` / `src/io/CMakeLists.txt` を実装
+4. INV7 とその違反フィクスチャを追加
+
+### 変更ファイル
+
+**追加**
+
+| ファイル | 内容 |
+|---|---|
+| `src/io/IoError.hpp` | `IoError`（5 値）。**発生させられる値だけを定義した** |
+| `src/io/IoConcepts.hpp` | `ByteSource` / `ByteSink` / `ProgressSink`（`cpp-conventions.md` §2.2 の定義どおり） |
+| `src/io/CMakeLists.txt` | `katachi_io`。**`Qt6::Widgets` をリンクしない。** T1 時点はヘッダのみのため `INTERFACE` |
+| `tests/io/io_concepts_test.cpp` | 実行時テスト 2 本 + `static_assert` 7 本。テストダブル 4 種 |
+| `tests/invariants/fixtures/violations/inv7/io/WidgetsInclude.hpp` | INV7 の違反フィクスチャ |
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `CMakeLists.txt` | `add_subdirectory(src/io)` を core と app の間に追加（依存方向どおりの順） |
+| `tests/CMakeLists.txt` | `io/io_concepts_test.cpp` の追加、`katachi_io` のリンク |
+| `tests/invariants/scan_invariants.cmake` | INV7 の走査対象（`io`）と判定を追加 |
+| `cmake/QualityGates.cmake` | `KATACHI_INVARIANT_CHECKS` に INV7 を追加（検査 12 本 → 14 本） |
+| `docs/phases.md` §3 | スキャナを 6 種 → **7 種**に更新し、追加の根拠を明記 |
+
+**削除**: なし
+
+### 設計上の判断
+
+**`katachi_io` は T1 時点では `INTERFACE` ライブラリ。** `IoError.hpp` / `IoConcepts.hpp` が
+ヘッダのみで、`STATIC` にするとソースが無くて CMake が失敗する。
+Phase 1 の `katachi_core` と同じ経緯であり、**`FileSource.cpp` が入る T2 で `STATIC` へ変更する。**
+
+**`Qt6::Widgets` をリンクしないことが受け入れ基準 5 の実体的な担保になる。**
+リンクしなければ `#include <QWidget>` のようなフラットヘッダは include パスに無く、
+コンパイル時に落ちる。INV7 はテキスト上の検出を担う。両方が揃って初めて塞がる。
+
+### 計画からの変更・追加（申告）
+
+**1. テストを 1 本ではなく 2 本にした。**
+承認された計画の T1 は実行時テスト 1 本（`IoError values are distinct and comparable`）だったが、
+**テストダブルが実際に動くことを確かめる 1 本を足した**
+（`the test doubles carry bytes through the io concepts`）。
+`MemorySource` / `MemorySink` / `FakeProgress` は T4 の `JobRunner` テストの土台になる。
+concept は構文しか見ないため、`static_assert` が通っても中身が壊れている可能性がある
+（`cpp-conventions.md` §2.5）。T4 が落ちたときに切り分けられるようにした。
+
+**2. `!ProgressSink<（isCancelled が noexcept でない型）>` を T4 から T1 へ前倒しした。**
+計画では T4 に置いていたが、`ProgressSink` を定義するのは T1 であり、
+否定側の `static_assert` は定義と同じ場所にある方が対応が見える。
+
+**3. `tests/CMakeLists.txt` から `katachi_core` の明示リンクを外した。**
+下記のリンカ警告を構成側で解消するため。`katachi_io` が INTERFACE で伝播する。
+
+### 遭遇した問題: リンカ警告（抑制せず構成で解消した）
+
+`katachi_tests` に `katachi_core` と `katachi_io` を両方書いたところ、
+`katachi_io` が `katachi_core` を INTERFACE 伝播するため同じアーカイブがリンク行に 2 回並び、
+Apple ld が警告を出した。
+
+```
+ld: warning: ignoring duplicate libraries: 'src/core/libkatachi_core.a'
+```
+
+**`-Werror` はリンカに効かないため、ビルドは exit 0 のまま警告だけが残る。**
+終了コードだけ見ていれば見逃していた。`CLAUDE.md` の「警告ゼロ」に反するため、
+**明示リンクを外して重複を無くした**（抑制はしていない）。理由は CMake にコメントとして残した。
+
+### 追加・変更したテスト（4 本追加。93 → 97）
+
+| テスト | 期待値 | 結果 |
+|---|---|---|
+| `IoError values are distinct and comparable` | 5 列挙値が互いに区別され、同値比較が成立 | pass |
+| `the test doubles carry bytes through the io concepts` | `MemorySource` → `MemorySink` でバイト列が一致。`FakeProgress` の `cancel()` / `onProgress()` が反映される | pass |
+| `invariant.inv7` | `src/io` に `QtWidgets` / `QWidget` の include が無い | pass |
+| `invariant.inv7.detects_violation` | 違反フィクスチャで**落ちる** | pass（`WILL_FAIL`） |
+
+`static_assert` による契約:
+
+- 肯定: `ByteSource<MemorySource>` / `ByteSink<MemorySink>` / `ProgressSink<FakeProgress>`
+- 否定: `!ByteSource<int>` / `!ByteSink<MemorySource>` / `!ProgressSink<MemorySink>` /
+  **`!ProgressSink<NoexceptlessProgress>`**（`isCancelled()` が `noexcept` でない型。
+  concept の `noexcept` 要求が実際に効いていることの確認）
+
+**本番型の `static_assert` はまだ無い。** `docs/phases.md` §2.2 は
+「その Phase で定義した concept について、本番型とテストダブル両方」を求めるが、
+本番型（`FileSource` / `FileSink` / `JobRunnerBridge`）は T2 と T6 で入る。
+**T2 で `ByteSource<FileSource>` / `ByteSink<FileSink>`、T6 で `ProgressSink<JobRunnerBridge>` を足す。**
+Phase 2 完了時に 3 つとも揃っていることを T10 で確認する。
+
+### INV7 が空振りでないことの確認（計画で約束した検証）
+
+違反フィクスチャが落ちることに加えて、**実ファイルで検出できることを確かめた。**
+
+| 確認 | 結果 |
+|---|---|
+| `src/io/IoError.hpp` に `#include <QtWidgets/QWidget>` を一時的に追加 | **検出**（`io/IoError.hpp:25`）。exit 1 |
+| 一時的な追加を戻す | `[INV7] ok`。`git diff` が空であることも確認 |
+
+### `Qt6::Widgets` を引いていないことの実測
+
+生成された `build.ninja` の `katachi_tests` のリンク行を直接見た。
+
+```
+1 libkatachi_core.a
+1 QtCore.framework
+1 QtGui.framework
+```
+
+**`QtWidgets.framework` が無い。** かつ `libkatachi_core.a` が **1 回だけ**であり、
+上記のリンカ警告が解消していることも同じ実測で確認できた。
+
+### 品質ゲートの実行結果（ローカル macOS 14 / arm64。ステージ済みの状態で実行）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --build --preset dev`（`--clean-first` でも確認） | exit 0 / **warning・error 0 行** |
+| 2 | `ctest --preset dev --output-on-failure` | exit 0 / **97 / 97 pass** |
+| 3 | `clang-format --dry-run --Werror` | exit 0 |
+| 4 | `clang-tidy -p build/dev`（対象 5 ファイル） | exit 0 / **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan --output-on-failure` | exit 0 / **97 / 97 pass** |
+
+`clang-format` は新規 4 ファイルに対して整形違反を出したため（列挙子の行末コメント揃え）、
+`clang-format -i` で整形してから再実行した。**整形したのは今回追加したファイルのみ。**
+
+**clang-tidy の到達範囲に注意。** 対象は `git ls-files 'src/*.cpp'` であり、
+`src/io` はまだ `.cpp` を持たないため**この 2 ヘッダには届いていない**。
+`src/app` / `src/core` の 5 本はいずれも io ヘッダを include していないため、
+`HeaderFilterRegex` 経由でも届かない。**T2 で `FileSource.cpp` が入るとゲートが io へ届く。
+届いた結果として新たな指摘が出ないか確認する**（Phase 1 の T3 で同じことが起きた）。
+
+### 推測で埋めた箇所
+
+**なし。** concept の定義は `docs/cpp-conventions.md` §2.2 の記述をそのまま写した。
+`IoError` の列挙値は、T2 / T3 で実際に発生させられることを確認できるものだけに絞った。
+
+### 残課題 / 次にやること
+
+1. **T1.5（ICO の内部キー `_q_icoOrigDepth`）に着手する。** 判断 3 で承認された core の修正。
+   `src/core/Converter.cpp` のメタデータ保持で `_q_` で始まるキーを除外し、
+   ICO フィクスチャとテスト 1 本（否定側込み）を足す。**単独コミットにする。**
+2. その後 T2（`FileSource` / `FileSink`）。ここで `katachi_io` を `INTERFACE` → `STATIC` へ変更し、
+   clang-tidy ゲートが io に届くようになる。
+3. `.serena/` は未追跡のまま。T1 のコミットにも含めていない。
+4. `phase1` ブランチの削除、Windows の実機起動確認はいずれも未了。

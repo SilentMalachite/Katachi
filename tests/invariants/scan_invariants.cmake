@@ -21,6 +21,13 @@
 #   INV4  <ROOT>/core からの io/ ・ QtWidgets の include
 #   INV5  QtNetwork / QNetwork* の include
 #   INV6  NOLINT / 警告抑制プラグマ
+#   INV7  <ROOT>/io からの QtWidgets の include
+#
+# INV7 は docs/phases.md §3 の 6 種に対する 7 つ目で、Phase 2 で承認を得て追加した。
+# io はワーカースレッドで動く層であり（ADR-0010）、QWidget に触れてはならない
+# （docs/phases.md §4 Phase 2 の受け入れ基準「ワーカースレッドから QWidget に触れていない」）。
+# **実体の担保は katachi_io が Qt6::Widgets をリンクしないことであり、
+# この検査はテキスト上の二重の網である。**
 
 cmake_minimum_required(VERSION 3.24)
 
@@ -55,6 +62,8 @@ if(KATACHI_SCAN_CHECK STREQUAL "INV3A" OR KATACHI_SCAN_CHECK STREQUAL "INV4")
     set(scan_subdir "core")
 elseif(KATACHI_SCAN_CHECK STREQUAL "INV3B")
     set(scan_subdir "app")
+elseif(KATACHI_SCAN_CHECK STREQUAL "INV7")
+    set(scan_subdir "io")
 elseif(KATACHI_SCAN_CHECK STREQUAL "INV6")
     set(strip_comments FALSE)
 elseif(NOT KATACHI_SCAN_CHECK MATCHES "^INV[1256]$")
@@ -178,6 +187,13 @@ foreach(file IN LISTS files)
                OR line MATCHES "#[ \t]*pragma[ \t]+(GCC|clang)[ \t]+diagnostic"
                OR line MATCHES "#[ \t]*pragma[ \t]+warning")
                 set(hit "警告抑制（CLAUDE.md で禁止。必要と判断したら停止して報告する）")
+            endif()
+
+        elseif(KATACHI_SCAN_CHECK STREQUAL "INV7")
+            if(line MATCHES "^[ \t]*#[ \t]*include")
+                if(line MATCHES "QtWidgets" OR line MATCHES "QWidget")
+                    set(hit "io → QtWidgets への依存（io はワーカー側の層。QWidget に触れない）")
+                endif()
             endif()
         endif()
 

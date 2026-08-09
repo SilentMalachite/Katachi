@@ -115,7 +115,7 @@ cmake --preset asan && ctest --preset asan   # ASan + UBSan（macOS / Linux）
 まさにその形を禁止する。**これ以上の除外を増やすときも、同じように根拠を ADR に書き、
 ここへ追記すること。黙って増やさない。**
 
-**不変条件スキャナ 6 種（`tests/` に置く。Phase 0 で実装する）**
+**不変条件スキャナ 7 種（`tests/` に置く。1〜6 は Phase 0、7 は Phase 2 で実装する）**
 
 CLAUDE.md の「絶対禁止」を機械化したもの。人手のレビューに頼らない。
 
@@ -125,6 +125,12 @@ CLAUDE.md の「絶対禁止」を機械化したもの。人手のレビュー�
 4. `src/core` が `src/io` / `QtWidgets` を include していない
 5. `src/` に `QtNetwork` / `QNetworkAccessManager` の include が無い
 6. `src/` に `NOLINT` / `#pragma GCC diagnostic` / `#pragma warning` が無い
+7. **`src/io` が `QtWidgets` / `QWidget` を include していない**（Phase 2 で追加）
+
+**7 は Phase 2 で承認を得て追加した。** io はワーカースレッドで動く層であり（ADR-0010）、
+`QWidget` に触れてはならない（§4 Phase 2 の「ワーカースレッドから `QWidget` に触れていない」）。
+**実体の担保は `katachi_io` が `Qt6::Widgets` をリンクしないことであり、7 はテキスト上の二重の網である。**
+これ以上スキャナを増やすときも、同じように根拠を ADR に書き、ここへ追記すること。
 
 **`.clang-format`**: LLVM ベース / `IndentWidth: 4` / `ColumnLimit: 100` / `PointerAlignment: Left`
 

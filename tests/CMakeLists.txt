@@ -36,7 +36,8 @@ add_executable(katachi_tests main.cpp core/qt_image_plugins_smoke.cpp core/resul
                             core/fixtures_test.cpp
                             core/converter_test.cpp
                             core/naming_rule_test.cpp
-                            core/format_matrix_test.cpp)
+                            core/format_matrix_test.cpp
+                            io/io_concepts_test.cpp)
 
 add_dependencies(katachi_tests katachi_fixtures)
 
@@ -44,9 +45,14 @@ target_compile_definitions(katachi_tests PRIVATE KATACHI_FIXTURE_DIR="${KATACHI_
 
 target_link_libraries(
     katachi_tests
+    # katachi_core は katachi_io が INTERFACE で伝播するため、ここには書かない。
+    # 両方書くと同じアーカイブがリンク行に 2 回並び、Apple ld が
+    #   ld: warning: ignoring duplicate libraries: 'src/core/libkatachi_core.a'
+    # を出す。-Werror はリンカに効かないため exit 0 のまま警告だけが残る。
+    # **警告を抑制せず、構成側で重複を無くした。**
     PRIVATE Catch2::Catch2
             Qt6::Gui
-            katachi_core
+            katachi_io
             katachi_warnings
             katachi_sanitizers)
 
