@@ -20,12 +20,36 @@
 
 | 依存 | 入手 | 備考 |
 |---|---|---|
-| Qt | ローカルは公式インストーラ、CI は `aqtinstall` | **CI は 6.8 系 LTS に固定する。** ローカルが 6.11 でも CI は下限に合わせる。6.8 以降に入った API を無自覚に使う事故を CI で検出するため |
+| Qt | ローカルは公式インストーラ、CI は `aqtinstall` | **CI は 6.8 系 LTS に固定する。** ローカルが 6.11 でも CI は下限に合わせる。6.8 以降に入った API を無自覚に使う事故を CI で検出するため。**モジュール指定は下記 1.5.1 を必ず読む** |
 | Catch2 v3 | `FetchContent` + **固定タグ** + `FIND_PACKAGE_ARGS`（システム版があれば優先） | 両 OS の CI で追加セットアップが不要。バージョンはタグで固定し、ブランチ名やレンジで追跡しない |
 | 追加コーデック | Phase 3 で決定（`docs/licenses.md` の更新が先） | オプショナル依存。無くてもビルド・起動できること |
 
 > **「ネットワーク通信禁止」はアプリ実行時の制約であり、ビルド時の依存取得は対象外。**
 > ただし再現性のため、`FetchContent` のタグは必ず固定する。
+
+### 1.5.1 Qt のモジュール指定（CI で必ず明示する）
+
+**画像フォーマットのプラグインは 2 つのモジュールに分かれている。**
+
+| モジュール | 含まれるプラグイン（macOS / Windows 実測） |
+|---|---|
+| `qtbase` | png（組込）/ `qjpeg` / `qgif` / `qico` / `qpdf` / `qsvg` |
+| **`qtimageformats`（アドオン）** | **`qtiff` / `qwebp` / `qjp2` / `qicns` / `qtga` / `qwbmp` / `qmacheif`** |
+
+**`qtimageformats` は既定ではインストールされない。**
+CI では `install-qt-action` の `modules: qtimageformats` で明示する。
+
+> **入れ忘れると TIFF / WebP などが能力表から丸ごと消える。**
+> Phase 1 の初回 CI で実際に起きた。4 ジョブすべてが
+> 「`oriented.tiff` の書き出しに失敗（Unsupported image format）」で落ちた。
+> ローカルは公式インストーラの全部入りで `qtimageformats` を含むため、
+> **ローカルでは green、CI だけ落ちるという形で現れる。**
+
+**能力表は実行時に生成されるため、この欠落はビルドエラーにならない。**
+「対応形式が減る」という形で静かに現れる。だからこそ CI で明示する。
+
+Phase 4 で `qtimageformats` を同梱する場合、その中の第三者ライブラリ
+（libtiff / libwebp 等）のライセンス文も必要になる（`docs/licenses.md` §4）。
 
 ---
 
@@ -84,6 +108,12 @@ cmake --preset asan && ctest --preset asan   # ASan + UBSan（macOS / Linux）
 
 `.clang-tidy` 有効チェック: `bugprone-*`, `cppcoreguidelines-*`, `modernize-*`, `performance-*`, `readability-*`, `misc-*`
 （`cppcoreguidelines-pro-bounds-*` と `modernize-use-trailing-return-type` は除外可）
+
+**追加の除外（Phase 1 で承認）**: `bugprone-exception-escape`。
+**ADR-0002 と原理的に両立しないため。** ADR-0002 は「コア関数は `noexcept` を維持し、
+確保失敗時の `std::terminate` を意図的に受け入れる」と決めており、この検査は
+まさにその形を禁止する。**これ以上の除外を増やすときも、同じように根拠を ADR に書き、
+ここへ追記すること。黙って増やさない。**
 
 **不変条件スキャナ 6 種（`tests/` に置く。Phase 0 で実装する）**
 
@@ -164,11 +194,16 @@ CLAUDE.md の「絶対禁止」を機械化したもの。人手のレビュー�
 | `resize` の補間方式 | **`Qt::SmoothTransformation` 固定** | 選択肢を増やすと決定性テストの組み合わせが増える。可変にするなら ADR を書いてから |
 | `convert()` の入力型 | **`QByteArray`**（`spec-core.md` §2 で確定） | — |
 | `JobRunner` の注入方式 | **テンプレート引数で注入**（`cpp-conventions.md` §2.3） | 同 §2.3 の表で決定済み。`std::function` 案は採らない |
+| メタデータ保持の実装手段 | **`MetadataPolicy::PreserveAll` を `PreserveSupported` に改名**し、向き / テキスト / ICC のみ保持する。EXIF 全体の保持は Phase 3 | Phase 1 着手時に Qt 6.8 の公式ドキュメントで確認したところ、EXIF 全体を読み書きする API が存在しなかった（**ADR-0003**） |
+| `convert()` の警告の返し方 | **成功値を `ConversionOutput` にし、`warnings` を載せる** | `spec-core.md` §4 が要求する警告の置き場所が `Result<QByteArray, ConvertError>` に無かった（**ADR-0004**） |
+| 衝突ポリシーの担当層 | **core は名前の生成のみ。衝突の解決は Phase 2 の `src/io`** | 衝突判定にファイルシステム参照が要り、core では禁止されているため（**ADR-0005**） |
 
 ### 5.2 未解決（Phase 1 着手時に決める）
 
-1. **メタデータ保持の実装手段** — Qt 単体では EXIF の完全な保持が難しい。`MetadataPolicy::PreserveAll` を Phase 1 で実装するか、Phase 3 に送るか。
-   **Phase 1 着手時に、使用する Qt バージョンの EXIF / ICC の実挙動を公式ドキュメントで確認してから判断する。今は推測しない**（`cpp-conventions.md` §3）。
+**該当なし。** かつてここにあった「メタデータ保持の実装手段」は、Phase 1 着手時に
+Qt 6.8 の公式ドキュメントで実挙動を確認したうえで決定し、§5.1 へ移した（ADR-0003）。
+
+新たに未解決事項が生じた場合はここに追記する。**推測で埋めず、決めた根拠を ADR に残すこと。**
 
 ### 5.3 Phase 2 着手時に決める
 

@@ -1,6 +1,12 @@
 # docs/phases.md §3 の指定どおり。
 # 有効: bugprone-* cppcoreguidelines-* modernize-* performance-* readability-* misc-*
 # 除外可として明示されているもの: cppcoreguidelines-pro-bounds-* / modernize-use-trailing-return-type
+#
+# bugprone-exception-escape は §3 の「除外可」に無いが、承認を得て追加した 3 つ目の除外。
+# ADR-0002 は「コア関数は noexcept を維持し、確保失敗時の std::terminate を意図的に
+# 受け入れる」と決めている。この検査はまさにその形（noexcept 関数から例外が抜けうる）を
+# 禁止するため、両立しない。ADR-0002 が熟考の上の決定であるため検査側を外す。
+# 根拠: docs/adr/0002-noexcept-and-allocation.md、docs/phases.md §3
 Checks: >
   -*,
   bugprone-*,
@@ -12,7 +18,8 @@ Checks: >
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
   -cppcoreguidelines-pro-bounds-constant-array-index,
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
-  -modernize-use-trailing-return-type
+  -modernize-use-trailing-return-type,
+  -bugprone-exception-escape
 
 # 警告を残したまま「通った」と報告できないようにする（docs/phases.md §3）。
 WarningsAsErrors: '*'

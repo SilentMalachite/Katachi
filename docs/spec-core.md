@@ -29,6 +29,7 @@ katachi/
 │   └── app/           # 依存: Qt6::Widgets
 │       ├── MainWindow / JobTableModel / SettingsPanel / main.cpp
 ├── tests/{core,io,fixtures}/
+├── tools/format_matrix.cpp          # docs/format-matrix.md の生成器（ビルド時に実行）
 ├── CLAUDE.md                       # リポジトリ直下（常時読み込み）
 ├── docs/                           # 参照文書は全てここ
 │   ├── spec-core.md / cpp-conventions.md / phases.md / agent-protocol.md
@@ -78,11 +79,22 @@ struct FormatId {
 `QString` ⇄ `FormatId` の変換関数は `FormatId.hpp` にのみ置く。
 **ここが「フォーマット名の文字列リテラル禁止」の唯一の例外である。**
 
+`formatIdFromString()` は **①前後の空白除去 ②小文字化 ③別名の代表名への吸収**（`jpg` / `jfif` → `jpeg`、`tif` → `tiff`）を行う（**ADR-0006**）。
+別名を畳む基準は「Qt が同一の MIME タイプを報告すること」で、`heic` / `heif` のように MIME が異なるものは畳まない。
+**`CapabilityTable` も同じ関数で正規化する。** 表の鍵と問い合わせの鍵が必ず同じ経路を通るため、片側だけ畳まれて引けなくなることはない。
+`buildFromQt()` は正規化後に同一 `FormatId` となった項目を 1 件へ統合し、`extensions` は和集合を取る。
+
 ```cpp
 enum class ConvertError {
     EmptyInput, DecodeFailed, UnsupportedTarget, EncodeFailed,
     AlphaLossNotAllowed,   // アルファ画像を非対応形式へ Reject 指定で変換
     ImageTooLarge,         // 上限は ConversionSpec::maxPixels
+};
+
+// 変換は成功したが、指定どおりには処理できなかったことの通知（ADR-0004）。
+// エラーではないため Result の E ではなく、成功値の側に載せる。
+enum class ConvertWarning {
+    AlphaFlattenedFallback,   // §4 3 行目: Preserve 指定だが出力形式が非対応のため Flatten した
 };
 ```
 
@@ -90,7 +102,9 @@ enum class ConvertError {
 // 値型。メンバは非 const（集成体初期化とコピー代入を壊さないため）だが、
 // 「生成後に書き換えない」ことを規約とする。受け渡しは常に const 参照。
 enum class AlphaPolicy    { Preserve, Flatten, Reject };
-enum class MetadataPolicy { PreserveAll, StripAll };
+// PreserveSupported は「Qt が扱える範囲」＝ 向き / テキスト / ICC を保持する。
+// EXIF 全体の保持は Qt 単体では不可能（ADR-0003）。
+enum class MetadataPolicy { PreserveSupported, StripAll };
 enum class IccPolicy      { Embed, Strip };
 
 struct ConversionSpec {
@@ -99,7 +113,7 @@ struct ConversionSpec {
     std::optional<QSize> resize       = std::nullopt;   // アスペクト比は常に保持
     AlphaPolicy          alpha        = AlphaPolicy::Preserve;
     QColor               flattenColor = Qt::white;
-    MetadataPolicy       metadata     = MetadataPolicy::PreserveAll;
+    MetadataPolicy       metadata     = MetadataPolicy::PreserveSupported;
     IccPolicy            icc          = IccPolicy::Embed;
     qint64               maxPixels    = 268'435'456;    // 16384 x 16384
 };
@@ -109,7 +123,15 @@ struct ConversionSpec {
 // Converter.hpp — 本アプリの心臓部。
 // 純粋関数：ファイルシステム・時刻・グローバル状態・乱数に触れない。
 // 同一入力に対して常に同一出力（バイト列）を返す。
-[[nodiscard]] Result<QByteArray, ConvertError>
+
+// 成功値。警告はエラーではないため E 側ではなくここに載せる（ADR-0004）。
+// 両メンバとも nothrow move 構築可能なので ResultValue を満たす。
+struct ConversionOutput {
+    QByteArray                  bytes;
+    std::vector<ConvertWarning> warnings;
+};
+
+[[nodiscard]] Result<ConversionOutput, ConvertError>
 convert(const QByteArray& source,
         const ConversionSpec& spec,
         const CapabilityTable& caps) noexcept;
@@ -157,6 +179,9 @@ static_assert(CapabilitySource<CapabilityTable>);   // 契約の明文化
 
 - `src/core/` `src/app/` にフォーマット名の文字列リテラルを書かない。すべて `CapabilityTable` 経由
 - **唯一の例外は `src/core/FormatId.hpp` 内の変換関数**（`QString` ⇄ `FormatId`）とテストコード。スキャナはこの 2 箇所だけを除外する
+- **禁止しているのは「フォーマット名の」文字列リテラルであって、文字列リテラル一般ではない。**
+  `src/core/NamingRule.cpp` の `{name}` / `{index}` / `{ext}` のような、フォーマット名でない
+  予約語のリテラルは許される（不変条件スキャナ INV3A / INV3B はフォーマット名の一覧と照合する）
 - CI にハードコードスキャナのテストを置く
 
 ---
@@ -166,7 +191,7 @@ static_assert(CapabilitySource<CapabilityTable>);   // 契約の明文化
 | 入力 | 出力形式 | AlphaPolicy | 挙動 |
 |---|---|---|---|
 | アルファあり | 対応 | 任意 | そのまま保持 |
-| アルファあり | 非対応 | `Preserve` | **`Flatten` にフォールバックし、警告を結果に含める** |
+| アルファあり | 非対応 | `Preserve` | **`Flatten` にフォールバックし、`ConversionOutput::warnings` に `ConvertWarning::AlphaFlattenedFallback` を 1 件積む**（ADR-0004） |
 | アルファあり | 非対応 | `Flatten` | `flattenColor` で合成 |
 | アルファあり | 非対応 | `Reject` | `ConvertError::AlphaLossNotAllowed` |
 | アルファなし | 任意 | 任意 | そのまま |
@@ -180,14 +205,34 @@ static_assert(CapabilitySource<CapabilityTable>);   // 契約の明文化
 ## 5. 命名規則（純粋関数）
 
 ```cpp
-// 例: "{name}_{index:03}.{ext}" → "photo_001.png"
+enum class NamingError {
+    EmptyPattern,        // pattern が空
+    UnknownPlaceholder,  // {} 内が既知の名前でない
+    InvalidIndexSpec,    // {index:...} の桁指定が不正
+    EmptyResult,         // 展開結果が空になった
+};
+
+// 書式と拡張子は強い型で分ける。どちらも中身は QString なので、素の引数で並べると
+// 呼び出し側が取り違えられる。FormatId と同じ「強い型付き文字列」の考え方（§2.1）で塞ぐ。
+struct NamePattern   { QString v; };
+struct NameExtension { QString v; };
+
+// 差し込める名前は {name} / {index} / {ext} の 3 つ。
+// {index} は :N を付けて最小桁数を指定できる（0 詰め、上限 32）。
+// 例: resolveOutputName("photo", 1, {"{name}_{index:03}.{ext}"}, {"png"}) → "photo_001.png"
 [[nodiscard]] Result<QString, NamingError>
 resolveOutputName(const QString& sourceBaseName, int index,
-                  const QString& pattern, const QString& extension) noexcept;
+                  const NamePattern& pattern, const NameExtension& extension) noexcept;
 ```
 
 衝突ポリシー: `Overwrite` / `Skip` / `Rename`（`_1`, `_2` を付与）。
 既定は **`Skip`**（破壊的操作を既定にしない）。
+
+> **衝突ポリシーの適用は core に置かない（ADR-0005）。**
+> 衝突判定には出力先の実在確認、すなわちファイルシステム参照が要る。
+> core ではファイルアクセスが禁止されているため実装できない。
+> `resolveOutputName()` は**名前の生成のみ**を担い、衝突の解決は
+> **Phase 2 の `src/io` 層**で行う。
 
 ---
 

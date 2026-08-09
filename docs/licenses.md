@@ -60,6 +60,21 @@ LGPLv3 は、ライブラリ部分を利用者が**差し替えて再リンク�
 libjpeg-turbo・libtiff・libwebp などの第三者ライブラリを内部に含む。
 これらは Qt の配布物の一部として提供され、それぞれ独自のライセンス条項を持つ。
 
+**プラグインは 2 つのモジュールに分かれている。**
+
+| モジュール | 含まれるプラグイン（macOS 実測） |
+|---|---|
+| `qtbase` | png（組込） / `qjpeg` / `qgif` / `qico` / `qpdf` / `qsvg` |
+| **`qtimageformats`（アドオン）** | `qtiff` / `qwebp` / `qjp2` / `qicns` / `qtga` / `qwbmp` / `qmacheif` |
+
+**`qtimageformats` は既定ではインストールされない。** CI では `install-qt-action` の
+`modules: qtimageformats` で明示的に入れている。これを入れないと TIFF / WebP などが
+能力表から丸ごと消える（Phase 1 の CI で実際に起きた）。
+
+**Phase 4 で配布する際、`qtimageformats` を同梱するなら、その中の第三者ライブラリの
+ライセンス文も `third_party_licenses.txt` に含める必要がある。** 同梱しない選択も
+あり得るが、その場合は対応フォーマットが狭くなる。
+
 **Phase 4 で `third_party_licenses.txt` を作成する際、実際に同梱するプラグインを列挙し、
 対応するライセンス文を収集する。** Phase 0 時点では成果物を配布しないため未着手。
 

@@ -3,4 +3,5 @@
 
 #include <QString>
 
-inline QString badLabel() { return QStringLiteral("core layer must not contain string literals"); }
+// フォーマット名のリテラルは core では禁止（FormatId.hpp を除く）。
+inline QString badFilter() { return QStringLiteral("Images (*.png)"); }
