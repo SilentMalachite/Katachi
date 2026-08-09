@@ -134,6 +134,52 @@ jobs:
       - name: clang-tidy
         run: clang-tidy -p build/dev $(git ls-files 'src/*.cpp')
 
+  extra-codecs:
+    name: 追加コーデック ON (macOS)
+    runs-on: macos-14
+
+    # ADR-0013 の 4 プラグイン（PSD / RAW / AVIF / JPEG XL）を実際にビルドして通す。
+    # **macOS のみ。** Windows で ON を通すには libavif / libjxl / LibRaw / ECM を
+    # vcpkg で用意する必要があり、Phase 3 のビルド基盤変更として大きすぎる。
+    # 既定の OFF パスは build-and-test ジョブが両 OS で検証し続ける。
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ninja を導入
+        run: brew install ninja
+
+      - name: Qt ${{ env.QT_VERSION }} を導入
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: clang_64
+          modules: qtimageformats
+          cache: true
+
+      # kimageformats はこれらを検出できたプラグインだけを作る。
+      # pkgconf は libjxl の検出（pkg_check_modules）に要る。
+      - name: コーデックライブラリを導入
+        run: brew install libavif jpeg-xl libraw pkgconf
+
+      # ECM と kimageformats は ExternalProject が固定タグで取得してビルドする。
+      # **Qt 6.8.3 でビルドできるかはここで初めて確認される**（ローカルは 6.11.1）。
+      - name: 構成とビルド（KATACHI_EXTRA_CODECS=ON）
+        run: |
+          cmake --preset dev-codecs
+          cmake --build --preset dev-codecs
+
+      - name: 対応フォーマット一覧を取り出す
+        uses: actions/upload-artifact@v4
+        with:
+          name: format-matrix-macOS-codecs
+          path: docs/format-matrix.md
+          if-no-files-found: error
+
+      - name: テスト
+        run: ctest --preset dev-codecs --output-on-failure
+        env:
+          QT_QPA_PLATFORM: offscreen
+
   sanitizers:
     name: ASan + UBSan (macOS)
     runs-on: macos-14

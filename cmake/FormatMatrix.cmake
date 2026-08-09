@@ -19,6 +19,12 @@ add_custom_command(
 
 add_custom_target(katachi_format_matrix_doc ALL DEPENDS "${KATACHI_FORMAT_MATRIX}")
 
+# 追加コーデックが ON のときは、プラグインの配置を待ってから生成する。
+# 待たないとビルド順によって内容が変わり、同じ構成なのに一覧が揺れる（Phase 3 T3 で観測）。
+if(TARGET katachi_extra_codecs)
+    add_dependencies(katachi_format_matrix_doc katachi_extra_codecs)
+endif()
+
 # テストからも生成物を検証する。tests は先に add_subdirectory されているため、
 # 依存とマクロ定義はここ（生成ターゲットの定義後）で足す。
 add_dependencies(katachi_tests katachi_format_matrix_doc)
