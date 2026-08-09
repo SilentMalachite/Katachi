@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 脆弱性の報告
+    url: https://github.com/SilentMalachite/Katachi/blob/main/SECURITY.md
+    about: 公開の Issue に書かないでください。SECURITY.md の手順に従ってください。
