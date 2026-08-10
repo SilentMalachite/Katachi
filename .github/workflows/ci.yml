@@ -78,6 +78,49 @@ jobs:
       - name: ビルド（警告ゼロ / -Werror・MSVC は /WX）
         run: cmake --build --preset dev
 
+      # ────────────────────────────────────────────────────────────────
+      # Phase 4 T1: 配布の前提を実測する。**一時的な手順である。**
+      #
+      # docs/progress/phase4.md の「推測で埋めた箇所」1〜4 を実測に置き換えるために
+      # 置く。T7 で恒久の package ジョブを作るときに、この 2 ステップは削除する。
+      #
+      # 落ちても後続を止めない（continue-on-error）。これは計測であって検査ではなく、
+      # ここで CI を赤くしても得るものが無い。**結果は必ず progress に記録する。**
+      # ────────────────────────────────────────────────────────────────
+      - name: T1 配布の前提を実測 (macOS)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          echo "── (1) Qt のアーキテクチャ ── universal binary が組めるかを決める"
+          lipo -archs "$QT_ROOT_DIR/lib/QtCore.framework/QtCore"
+          echo
+          echo "── (2) macdeployqt の署名・公証オプション ──"
+          # 引数なしだと使い方を表示して exit 1 を返すため、パイプの前で握りつぶす。
+          { "$QT_ROOT_DIR/bin/macdeployqt" 2>&1 || true; } \
+            | grep -E 'codesign|hardened-runtime|timestamp|notarization|-dmg' \
+            || echo "(該当するオプションが無い)"
+          echo
+          echo "── (5) 成果物の形 ── qt_add_executable が .app を作るかどうか"
+          ls -d build/dev/src/app/katachi*
+        shell: bash
+
+      - name: T1 配布の前提を実測 (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: |
+          echo "── (4) PE のサブシステム ── コンソール窓が出るかどうかの実体"
+          dumpbin -headers build/dev/src/app/katachi.exe | grep -i subsystem || true
+          echo
+          echo "── (3) windeployqt が何を配置するか ──"
+          mkdir -p stage && cp build/dev/src/app/katachi.exe stage/
+          "$QT_ROOT_DIR/bin/windeployqt.exe" stage/katachi.exe
+          echo "-- 配置されたファイル --"
+          find stage -type f | sort
+          echo "-- 合計 --"
+          find stage -type f | wc -l | xargs echo "ファイル数:"
+          du -sh stage | awk '{print "大きさ:", $1}'
+        shell: bash
+
       # docs/format-matrix.md はビルド時に生成され、内容は実行環境の Qt プラグイン構成で
       # 決まる（cmake/FormatMatrix.cmake）。OS ごとに何が使えるのかを推測で書かないため、
       # 両 OS の生成物をここで取り出す（Phase 3 T1）。
