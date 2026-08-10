@@ -100,20 +100,28 @@ jobs:
             | grep -E 'codesign|hardened-runtime|timestamp|notarization|-dmg' \
             || echo "(該当するオプションが無い)"
           echo
-          echo "── (5) 成果物の形 ── qt_add_executable が .app を作るかどうか"
-          ls -d build/dev/src/app/katachi*
+          echo "── (5) 成果物の形 ── T2 で MACOSX_BUNDLE を明示した結果を確認する"
+          ls -d build/dev/src/app/Katachi.app
+          find build/dev/src/app/Katachi.app -type f
+          echo
+          echo "── 配布対象の下限（T2 で 13.0 を指定した）──"
+          otool -l build/dev/src/app/Katachi.app/Contents/MacOS/Katachi \
+            | grep -A4 LC_BUILD_VERSION | grep -E 'minos|sdk'
         shell: bash
 
       - name: T1 配布の前提を実測 (Windows)
         if: runner.os == 'Windows'
         continue-on-error: true
         run: |
-          echo "── (4) PE のサブシステム ── コンソール窓が出るかどうかの実体"
-          dumpbin -headers build/dev/src/app/katachi.exe | grep -i subsystem || true
+          echo "── (4) PE のサブシステム ── T2 で WIN32_EXECUTABLE を明示した結果"
+          dumpbin -headers build/dev/src/app/Katachi.exe | grep -i subsystem || true
+          echo
+          echo "── バージョン資源が埋まっているか（T2 の .rc）──"
+          dumpbin -headers build/dev/src/app/Katachi.exe | grep -i "resource" || true
           echo
           echo "── (3) windeployqt が何を配置するか ──"
-          mkdir -p stage && cp build/dev/src/app/katachi.exe stage/
-          "$QT_ROOT_DIR/bin/windeployqt.exe" stage/katachi.exe
+          mkdir -p stage && cp build/dev/src/app/Katachi.exe stage/
+          "$QT_ROOT_DIR/bin/windeployqt.exe" stage/Katachi.exe
           echo "-- 配置されたファイル --"
           find stage -type f | sort
           echo "-- 合計 --"

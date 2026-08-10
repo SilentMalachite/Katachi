@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  src/app/CMakeLists.txt が configure_file(@ONLY) で展開する。
+  値の出所は project() 一つだけにする（ADR-0015 D11）。ここに数値を直接書かない。
+
+  LSApplicationCategoryType は**意図的に入れていない。** App Store 配布でのみ
+  必須の項目であり、本プロジェクトは App Store を対象にしない（Phase 4 の
+  「今回やらないこと」）。分類を選ぶと推測になるため、書かない。
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+
+    <key>CFBundleExecutable</key>
+    <string>@KATACHI_EXECUTABLE_NAME@</string>
+
+    <!-- Contents/Resources/katachi.icns を指す。拡張子は省くのが慣例。 -->
+    <key>CFBundleIconFile</key>
+    <string>katachi</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>com.silentmalachite.katachi</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <key>CFBundleName</key>
+    <string>@PROJECT_NAME@</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>@PROJECT_VERSION@</string>
+
+    <key>CFBundleVersion</key>
+    <string>@PROJECT_VERSION@</string>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>@CMAKE_OSX_DEPLOYMENT_TARGET@</string>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright (C) 2026 Silent Malachite. Licensed under GPL-3.0-or-later.</string>
+</dict>
+</plist>

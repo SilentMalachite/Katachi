@@ -15,6 +15,13 @@ if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_SYSROOT)
     endif()
 endif()
 
+# CLAUDE.md: 対象 OS は macOS 13 以上。SDK と同じく project() より前に置く。
+# 明示しないと、ビルドしたマシンの macOS 版が下限になる（開発機は 26 系）。
+# Phase 4 T7 の package.deployment_target がこの値を機械で検査する。
+if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "macOS deployment target")
+endif()
+
 project(
     Katachi
     VERSION 0.1.0
@@ -41,11 +48,18 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Widgets)
 
 # 警告設定は INTERFACE ターゲットで配る。FetchContent で取得する第三者コード
 # （Catch2）へ -Werror を波及させないため、グローバルフラグにはしない。
+#
+# COMPILE_LANGUAGE:CXX で括る理由: Phase 4 T2 で Windows のリソース (.rc) を
+# katachi のソースに加えた。CMake は target の COMPILE_OPTIONS を RC コンパイラにも
+# 渡すため、括らないと rc.exe が /W4 /WX を受け取って落ちる。
+# **全ソースが CXX なので、既存ターゲットの警告設定は何も変わらない。**
 add_library(katachi_warnings INTERFACE)
 if(MSVC)
-    target_compile_options(katachi_warnings INTERFACE /W4 /WX /permissive-)
+    target_compile_options(katachi_warnings INTERFACE
+                           $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /permissive->)
 else()
-    target_compile_options(katachi_warnings INTERFACE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(katachi_warnings INTERFACE
+                           $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic -Werror>)
 endif()
 
 # docs/phases.md §3: ASan + UBSan は macOS / Linux が対象。

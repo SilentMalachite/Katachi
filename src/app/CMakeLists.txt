@@ -25,3 +25,44 @@ target_link_libraries(
 qt_add_executable(katachi main.cpp)
 
 target_link_libraries(katachi PRIVATE katachi_app katachi_warnings katachi_sanitizers)
+
+# ── Phase 4 T2: 配布物の形とメタデータ ────────────────────────────────
+#
+# 実行ファイル名は Katachi（ターゲット名 katachi と区別する）。利用者から見える
+# 名前であり、macOS では Katachi.app、Windows では Katachi.exe になる。
+set(KATACHI_EXECUTABLE_NAME "${PROJECT_NAME}")
+
+set_target_properties(katachi PROPERTIES OUTPUT_NAME "${KATACHI_EXECUTABLE_NAME}")
+
+# **qt_add_executable は MACOSX_BUNDLE も WIN32_EXECUTABLE も既定では設定しない。**
+# Qt の公式ドキュメントは「引数は add_executable へそのまま渡される」と述べており、
+# T1 の実測でも macOS は素の実行ファイル、Windows は subsystem 3 (Windows CUI)
+# だった。**既定に頼らず両方を明示する。**
+set_target_properties(katachi PROPERTIES MACOSX_BUNDLE TRUE WIN32_EXECUTABLE TRUE)
+
+if(APPLE)
+    configure_file("${PROJECT_SOURCE_DIR}/packaging/macos/Info.plist.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/Info.plist" @ONLY)
+
+    set_target_properties(katachi PROPERTIES MACOSX_BUNDLE_INFO_PLIST
+                                             "${CMAKE_CURRENT_BINARY_DIR}/Info.plist")
+
+    # アイコンは Contents/Resources へ入れる。Info.plist の CFBundleIconFile が指す。
+    set(katachi_icns "${PROJECT_SOURCE_DIR}/packaging/icons/katachi.icns")
+    target_sources(katachi PRIVATE "${katachi_icns}")
+    set_source_files_properties("${katachi_icns}" PROPERTIES MACOSX_PACKAGE_LOCATION
+                                                             Resources)
+endif()
+
+if(WIN32)
+    enable_language(RC)
+
+    configure_file("${PROJECT_SOURCE_DIR}/packaging/windows/katachi.rc.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/katachi.rc" @ONLY)
+
+    # .rc の ICON 文は自身と同じディレクトリを起点に解決される。複製して隣に置く。
+    file(COPY "${PROJECT_SOURCE_DIR}/packaging/icons/katachi.ico"
+         DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+
+    target_sources(katachi PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/katachi.rc")
+endif()

@@ -99,7 +99,12 @@ cmake --preset dev
 cmake --build --preset dev
 ```
 
-実行ファイルは `build/dev/src/app/katachi`（Windows は `katachi.exe`）。
+成果物は **macOS が `build/dev/src/app/Katachi.app`**、**Windows が
+`build/dev/src/app/Katachi.exe`**。
+
+> **開発ビルドでも配布時と同じ形（macOS は `.app`、Windows は GUI サブシステム）で作る。**
+> 配布時にしか通らない構成を作らないためである（`docs/adr/0015-packaging.md`）。
+> macOS の実行本体は `Katachi.app/Contents/MacOS/Katachi` にある。
 
 ### テスト
 

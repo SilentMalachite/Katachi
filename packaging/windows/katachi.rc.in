@@ -1,0 +1,43 @@
+// Windows のリソース。src/app/CMakeLists.txt が configure_file(@ONLY) で展開する。
+// 値の出所は project() 一つだけにする（ADR-0015 D11）。ここに数値を直接書かない。
+//
+// windows.h を include しない。数値の定数を直に書けば済み、
+// リソースコンパイラの include パス設定に依存しないため。
+//   FILEOS   0x00040004 = VOS_NT_WINDOWS32
+//   FILETYPE 0x00000001 = VFT_APP
+//
+// アイコンは ID 1 に置く。Windows は最も小さい番号のアイコン資源を
+// 実行ファイルのアイコンとして使う。ファイル名は .rc と同じディレクトリを指す
+// （CMake が katachi.ico をビルドディレクトリへ複製する）。
+
+1 ICON "katachi.ico"
+
+1 VERSIONINFO
+FILEVERSION @PROJECT_VERSION_MAJOR@, @PROJECT_VERSION_MINOR@, @PROJECT_VERSION_PATCH@, 0
+PRODUCTVERSION @PROJECT_VERSION_MAJOR@, @PROJECT_VERSION_MINOR@, @PROJECT_VERSION_PATCH@, 0
+FILEFLAGSMASK 0x0000003FL
+FILEFLAGS 0x00000000L
+FILEOS 0x00040004L
+FILETYPE 0x00000001L
+FILESUBTYPE 0x00000000L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Silent Malachite"
+            VALUE "FileDescription", "@PROJECT_DESCRIPTION@"
+            VALUE "FileVersion", "@PROJECT_VERSION@"
+            VALUE "InternalName", "@KATACHI_EXECUTABLE_NAME@"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Silent Malachite. GPL-3.0-or-later."
+            VALUE "OriginalFilename", "@KATACHI_EXECUTABLE_NAME@.exe"
+            VALUE "ProductName", "@PROJECT_NAME@"
+            VALUE "ProductVersion", "@PROJECT_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        // 0x0409 = 英語 (米国)、1200 = Unicode
+        VALUE "Translation", 0x0409, 1200
+    END
+END
