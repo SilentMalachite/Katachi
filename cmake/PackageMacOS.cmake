@@ -181,6 +181,19 @@ if(DEFINED KATACHI_OUTPUT_DMG AND NOT KATACHI_OUTPUT_DMG STREQUAL "")
     endif()
     file(REMOVE_RECURSE "${dmg_root}")
     message(STATUS ".dmg を作った: ${KATACHI_OUTPUT_DMG}")
+
+    # **.dmg 自身にも署名する。** .app の署名とは別物で、付けないと
+    # 「code object is not signed at all」のまま公証へ出すことになる（実測）。
+    if(DEFINED KATACHI_SIGN_IDENTITY AND NOT KATACHI_SIGN_IDENTITY STREQUAL "")
+        execute_process(COMMAND codesign --force --timestamp
+                                --sign "${KATACHI_SIGN_IDENTITY}" "${KATACHI_OUTPUT_DMG}"
+                        RESULT_VARIABLE dmg_sign_result)
+        if(NOT dmg_sign_result EQUAL 0)
+            message(FATAL_ERROR ".dmg の署名に失敗した")
+        endif()
+        message(STATUS ".dmg に署名した。次は公証（docs/release.md §3）")
+    endif()
+
     if(NOT DEFINED KATACHI_SIGN_IDENTITY OR KATACHI_SIGN_IDENTITY STREQUAL "")
         message(STATUS "  **この .dmg は未署名・未公証である。** 配布してはならない。"
                        "docs/release.md の手順で署名・公証すること")

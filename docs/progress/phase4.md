@@ -966,3 +966,60 @@ $ env -i HOME=... PATH=/usr/bin:/bin ./Katachi.app/Contents/MacOS/Katachi
 2. **公証: 資格情報の保存（`docs/release.md` §3.1）をお願いする**
 3. T6: Windows のパッケージング
 4. T7: 機械検査 P1〜P8
+
+---
+
+## 2026-08-11 — T5: 署名まで完了。**推測 10 は解消**（キーチェーンの許可待ちだった）
+
+### 推測 10 の解消
+
+前エントリで「署名が止まるのはキーチェーンの許可待ちと**考えられる**」と書いた。
+**利用者が端末から 1 度実行して許可したところ、以後は非対話でも通るようになった。**
+
+```
+$ codesign --force --options runtime --timestamp --sign "Developer ID ..." /tmp/signtest/probe
+/tmp/signtest/probe: replacing existing signature      ← 対話で許可
+$ codesign ... /tmp/signtest/probe2                    ← 以後は非対話
+exit=0
+```
+
+**推測が実測に置き換わった。** `docs/release.md` §2.1 の手順は正しい。
+
+### 署名の実測
+
+| 検査 | 結果 |
+|---|---|
+| `codesign --verify --deep --strict` | **exit 0**。`valid on disk` / `satisfies its Designated Requirement` |
+| 署名の中身 | `Identifier=com.silentmalachite.katachi` / `Authority=Developer ID Application: Hiroshi Annaka (UZQNSQAUY2)` / **`flags=0x10000(runtime)`**（hardened runtime）/ Timestamp あり |
+| `spctl --assess --type execute` | **`rejected` / `source=Unnotarized Developer ID`** |
+
+**`spctl` の拒否は正しい状態である。** 署名済みだが未公証のときに Gatekeeper が返す
+答えであり、公証と staple を済ませると `accepted` に変わる。
+**「拒否されたから失敗」ではない。** 公証前にここで止まっているだけである。
+
+### `.dmg` 自身の署名を足した（**実測で気づいた漏れ**）
+
+`.app` を署名しても **`.dmg` は `code object is not signed at all` のままだった。**
+別物なので別に署名が要る。`cmake/PackageMacOS.cmake` に追加した。
+
+```
+Authority=Developer ID Application: Hiroshi Annaka (UZQNSQAUY2)
+Timestamp=Aug 11, 2026 at 8:32:00
+build/release/Katachi-0.1.0.dmg: valid on disk
+build/release/Katachi-0.1.0.dmg: satisfies its Designated Requirement
+```
+
+### 現在の成果物
+
+| | 実測 |
+|---|---|
+| `Katachi.app` | 52 MB / universal / 署名済み（hardened runtime + timestamp） |
+| `Katachi-0.1.0.dmg` | **24 MB** / 署名済み。`Katachi.app` / `Applications` / `LICENSE` / `third_party_licenses.txt` |
+
+### 残課題 / 次にやること
+
+1. **公証。** 資格情報（App Store Connect の API キー、またはアプリ用パスワード）の
+   保存を利用者にお願いする（`docs/release.md` §3.1）。
+   **公証は Apple へバイナリを送る外向きの操作であり、勝手に実行しない**
+2. T6: Windows のパッケージング
+3. T7: 機械検査 P1〜P8
