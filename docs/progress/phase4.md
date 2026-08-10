@@ -283,3 +283,183 @@ T0 で「未決のまま残る」と書いたアプリアイコン（判断 1）
 1. **T2 でアイコンを配布物に接続する**（`MACOSX_BUNDLE_ICON_FILE` と Windows の `.rc`）
 2. T1（CI での実測 4 点）は未着手のまま。**次はこれに戻る**
 3. 判断 1 が解消したため、**T0 で挙げた未決事項は無くなった**
+
+---
+
+## 2026-08-11 — T1 完了。推測 4 件を実測に置き換え、**新たな論点を 3 件見つけた**
+
+### 実施内容
+
+`.github/workflows/ci.yml` の `build-and-test` ジョブへ OS 別の計測ステップを 1 つずつ足した。
+**CI run 31412328017（commit `a204b19`）で 5 ジョブとも success。**
+
+計測ステップには `continue-on-error` を付けた。**これは計測であって検査ではない。**
+T7 で恒久の `package` ジョブを作るときに削除する。
+
+### 実測結果（すべて CI の出力。推測ではない）
+
+**(1) Qt 6.8.3 / macOS の `QtCore` は universal**
+
+```
+x86_64 arm64
+```
+
+**T0 の推測 4「aqtinstall の Qt 6.8.3 が universal か」は解消した。当たっていた。**
+ローカル 6.11.1 と同じである。D7（`release` プリセットで universal 化）の前提が立った。
+
+**(2) Qt 6.8.3 の `macdeployqt` は署名・公証のオプションを持つ**
+
+```
+-dmg                          : Create a .dmg disk image
+-codesign=<ident>             : Run codesign with the given identity on all executables
+-hardened-runtime             : Enable Hardened Runtime when code signing
+-timestamp                    : Include a secure timestamp when code signing
+-sign-for-notarization=<ident>: Activate the necessary options for notarization
+```
+
+**T0 の推測 3 は解消した。5 つとも 6.11.1 と同じである。**
+細かい差として、**6.8.3 の `-codesign` には `(default: ad-hoc sign)` の但し書きが無い**。
+T5 では `-sign-for-notarization` を使うため、この差は効かない見込みだが記録しておく。
+
+**(3) `qt_add_executable` は `.app` を作らない（CI の Qt 6.8.3 でも）**
+
+```
+build/dev/src/app/katachi
+```
+
+ローカル 6.11.1 と一致した。**T2 で `MACOSX_BUNDLE` を明示する必要が確定した。**
+これは計画に無かった 5 点目で、計測ステップを足すときに申告した。
+
+**(4) Windows の実行ファイルは「コンソールアプリ」としてリンクされている**
+
+```
+3 subsystem (Windows CUI)
+```
+
+**T0 の推測 2 は解消した。当たっていた。** `WIN32_EXECUTABLE` が未設定のため、
+**現状のまま配布すると起動時にコンソール窓が出る。** T2 で明示する必要が確定した。
+
+**(5) `windeployqt` が配置するもの（Debug ビルドに対して実行）**
+
+**68 ファイル / 122 MB。** 内訳は次のとおり。
+
+| 区分 | 中身 |
+|---|---|
+| Qt モジュール 6 | `Qt6Concurrentd` `Qt6Cored` `Qt6Guid` **`Qt6Networkd`** `Qt6Svgd` `Qt6Widgetsd` |
+| `imageformats` 9 | `qgifd` `qicnsd` `qicod` `qjpegd` `qsvgd` `qtgad` `qtiffd` `qwbmpd` `qwebpd` |
+| `platforms` 1 | `qwindowsd` |
+| `styles` 1 | `qmodernwindowsstyled` |
+| `iconengines` 1 | `qsvgicond` |
+| `generic` 1 | `qtuiotouchplugind` |
+| **`networkinformation` 1** | **`qnetworklistmanagerd`** |
+| **`tls` 2** | **`qcertonlybackendd` `qschannelbackendd`** |
+| `translations` 31 | `qt_ar.qm` 〜 `qt_zh_TW.qm` |
+| MSVC ランタイム 10 | `msvcp140d` 等（**すべてデバッグ版**） |
+| その他 4 | `opengl32sw` `d3dcompiler_47` `dxcompiler` `dxil` |
+
+`imageformats` に **`qjp2` が無い**のは Phase 3 T1 の実測（Windows は jp2 が使えない）と
+整合する。`qmacheif` / `qmacjp2` が macOS 固有であることの裏返しでもある。
+
+### この実測で新たに見つかった論点（**3 件。いずれも計画時に想定していなかった**）
+
+**論点 A: `Qt6Network` と TLS バックエンドが配布物に入る**
+
+`windeployqt` の出力にこうある。
+
+```
+Direct dependencies: Qt6Concurrent Qt6Core Qt6Gui Qt6Widgets
+To be deployed     : Qt6Concurrent Qt6Core Qt6Gui Qt6Network Qt6Svg Qt6Widgets
+```
+
+**直接依存に `Qt6Network` は無い。** それでも配置されるのは、`windeployqt` が
+`iconengines/qsvgicon` と `generic/qtuiotouchplugin` を無条件に入れ、
+**後者が `Qt6Network` を引く**ためである（ログに
+`Adding Qt6Network for qtuiotouchplugind.dll from plugin type: generic` とある）。
+連鎖して `networkinformation` と `tls` のプラグインまで入る。
+
+**`CLAUDE.md` の絶対禁止（アプリ実行時のネットワーク通信全般）に違反してはいない。**
+`src/` は `QNetworkAccessManager` を include しておらず、不変条件スキャナ INV5 が
+それを機械で保証している。アプリはこれらの DLL を呼ばない。
+
+**しかし `README.md` は「アプリはネットワーク通信を一切行わない」と明記している。**
+その配布物に `Qt6Network.dll` と TLS バックエンドが同梱されているのは、
+**利用者から見て説明が要る状態である。** 落とせるなら落とすべきだと考える。
+
+**`windeployqt` に該当する除外オプションがあるかは、一次情報で確認していない。**
+確認するまで「落とせる」と書かない（`CLAUDE.md` 停止条件 3）。**T6 で確認して対処する。**
+
+**論点 B: デバッグ版の MSVC ランタイムは再配布できない**
+
+配置された `msvcp140d.dll` `vcruntime140d.dll` などは**デバッグ版**である。
+Microsoft のランタイムは、デバッグ版の再配布が許諾されていない。
+
+**計画では T3 で `release` プリセットを作ることになっており、これで解消する見込みである。**
+ただし**「Release でビルドすれば足りる」ことをまだ実測していない。**
+T3 の完了条件に「配置される MSVC ランタイムがデバッグ版でないこと」を加える。
+
+**この論点は `docs/licenses.md` の対象でもある。** §3 は「ビルド時のみの依存」を
+Catch2 だけと書いているが、**MSVC ランタイムは成果物に同梱される第三者コード**である。
+T4 で `docs/licenses.md` に節を起こす。
+
+**論点 C: 122 MB は大きい。ただし Debug の値である**
+
+`opengl32sw.dll` と `dxcompiler.dll` が大きく、`translations/` に 31 個の
+`.qm` が入る。**本アプリは翻訳を持たないので `translations/` は要らない。**
+Release で測り直したうえで、除外できるものを T6 で決める。
+
+**現時点で「Release ならいくつになる」とは書かない。測っていないため。**
+
+### 承認された計画からの変更（申告）
+
+**計測項目を 4 点から 5 点に増やした**（上記 (3)）。`qt_add_executable` が
+`.app` を作るかどうかは T2 の前提であり、同じジョブで 1 行で測れるため足した。
+ステップを足すコミットのメッセージにも申告を書いた。
+
+### 変更ファイル
+
+- 変更: `.github/workflows/ci.yml`（計測ステップ 2 つ、43 行追加）
+- 変更: `docs/progress/phase4.md`（本エントリ）
+- **`src/` の変更: なし**
+
+### 追加・変更したテスト
+
+**なし。** T1 は計測のみ。**計測ステップは検査ではない**（`continue-on-error` を付けている）。
+配布物の検査は T7 の P1〜P8 で行う。
+
+### 品質ゲートの実行結果
+
+| 実行 | 結果 |
+|---|---|
+| CI run 31412328017（5 ジョブ） | **すべて success** |
+| ビルド + テスト (macOS) / (Windows) | success |
+| clang-format + clang-tidy (macOS) | success |
+| 追加コーデック ON (macOS) | success |
+| ASan + UBSan (macOS) | success |
+
+ローカルのゲートは実行していない。**変更は `.github/workflows/ci.yml` のみで、
+コンパイル対象にも `src/` にも触れていないため。** CI の 5 ジョブが 6 ゲート全数を担っている。
+
+### 推測で埋めた箇所
+
+**T0 で挙げた 5 件のうち 4 件が解消した。残り 1 件と、新たに 1 件ある。**
+
+| # | 内容 | 状態 |
+|---|---|---|
+| 1 | Windows の `windeployqt` の出力構成 | **解消**（上記 (5)） |
+| 2 | コンソール窓が出るか | **解消**（上記 (4)。当たっていた） |
+| 3 | Qt 6.8.3 の `macdeployqt` の署名オプション | **解消**（上記 (2)） |
+| 4 | Qt 6.8.3 が universal か | **解消**（上記 (1)。当たっていた） |
+| 5 | universal 構成で clang-tidy が通るか | **未解消。T3 で確かめる** |
+| **6** | **`windeployqt` に `Qt6Network` / `translations` を除外するオプションがあるか** | **新規。未確認。T6 で一次情報を見る** |
+
+加えて、T8 の前提「ローカルの Qt は `~/Qt` 配下にしかない」は依然として未確認である
+（Homebrew 版 Qt の有無を見ていない）。
+
+### 残課題 / 次にやること
+
+1. **論点 A（`Qt6Network` の同梱）について判断を仰ぐ。** README の記述との整合の問題であり、
+   技術的にどうするかの前に「これを問題と見るか」の判断が要る
+2. T2: バンドル化とメタデータ。**(3) と (4) により、`MACOSX_BUNDLE` と
+   `WIN32_EXECUTABLE` を明示する必要が実測で確定した**
+3. T3 の完了条件に「MSVC ランタイムがデバッグ版でないこと」を加える（論点 B）
+4. T6 で `windeployqt` の除外オプションを一次情報で確認する（論点 A・C、推測 6）
