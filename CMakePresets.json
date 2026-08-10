@@ -40,6 +40,15 @@
       "cacheVariables": {
         "KATACHI_EXTRA_CODECS": "ON"
       }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "release - 配布用（最適化 / macOS は universal）",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "KATACHI_PACKAGE": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -54,6 +63,10 @@
     {
       "name": "dev-codecs",
       "configurePreset": "dev-codecs"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
     }
   ],
   "testPresets": [
@@ -74,6 +87,13 @@
     {
       "name": "dev-codecs",
       "configurePreset": "dev-codecs",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
       "output": {
         "outputOnFailure": true
       }

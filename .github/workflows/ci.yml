@@ -107,6 +107,15 @@ jobs:
           echo "── 配布対象の下限（T2 で 13.0 を指定した）──"
           otool -l build/dev/src/app/Katachi.app/Contents/MacOS/Katachi \
             | grep -A4 LC_BUILD_VERSION | grep -E 'minos|sdk'
+          echo
+          echo "── (6) release プリセット: universal と据え付け（T3）──"
+          cmake --preset release > /dev/null
+          cmake --build --preset release > /dev/null
+          cmake --install build/release --prefix build/release/stage > /dev/null
+          echo "アーキテクチャ:"
+          lipo -archs build/release/stage/Katachi.app/Contents/MacOS/Katachi
+          echo "据え付けた木:"
+          find build/release/stage | sed 's|build/release/stage|<prefix>|'
         shell: bash
 
       - name: T1 配布の前提を実測 (Windows)
@@ -127,6 +136,14 @@ jobs:
           echo "-- 合計 --"
           find stage -type f | wc -l | xargs echo "ファイル数:"
           du -sh stage | awk '{print "大きさ:", $1}'
+          echo
+          echo "── (6) release プリセットの据え付け（T3）──"
+          # **ローカルは macOS しかないため、Windows の据え付けはここが唯一の検証である。**
+          cmake --preset release > /dev/null
+          cmake --build --preset release > /dev/null
+          cmake --install build/release --prefix build/release/stage > /dev/null
+          echo "据え付けた木:"
+          find build/release/stage | sed 's|build/release/stage|<prefix>|'
         shell: bash
 
       # docs/format-matrix.md はビルド時に生成され、内容は実行環境の Qt プラグイン構成で

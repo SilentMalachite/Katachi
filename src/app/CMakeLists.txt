@@ -54,6 +54,19 @@ if(APPLE)
                                                              Resources)
 endif()
 
+# ── 配布物の据え付け（ADR-0015 D5）────────────────────────────────────
+#
+# macOS は Katachi.app を、Windows は Katachi.exe を**接頭辞の直下**へ置く。
+# Windows で bin/ を挟まないのは、windeployqt が DLL を実行ファイルの隣に
+# 並べる前提だからである（T1 の実測。stage/Katachi.exe と stage/*.dll）。
+#
+# 署名・dmg 化（T5）と windeployqt・zip・インストーラ（T6）は、この据え付けた木を
+# 入力にする。**プリセットに依らず常に定義する。** dev の木でも試せるようにするため。
+install(
+    TARGETS katachi
+    BUNDLE DESTINATION .
+    RUNTIME DESTINATION .)
+
 if(WIN32)
     enable_language(RC)
 

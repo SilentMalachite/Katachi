@@ -15,6 +15,18 @@ if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_SYSROOT)
     endif()
 endif()
 
+# 配布用の構成（ADR-0015）。**既定 OFF。** release プリセットだけが ON にする。
+#
+# universal 化を release だけに限る理由（ADR-0015 論点 3）: dev を universal にすると
+# compile_commands.json に -arch が 2 つ並び、品質ゲートの clang-tidy が扱えなくなる
+# 恐れがある。分岐した構成を放置しないよう、CI の package ジョブが release を毎回通す。
+#
+# KATACHI_PACKAGE はプリセットが -D で渡すため、project() より前でも cache から読める。
+# option() の宣言は project() の後にある（既定値の記録と、T7 の検査の切り替えのため）。
+if(CMAKE_HOST_APPLE AND KATACHI_PACKAGE AND NOT DEFINED CMAKE_OSX_ARCHITECTURES)
+    set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "macOS universal binary")
+endif()
+
 # CLAUDE.md: 対象 OS は macOS 13 以上。SDK と同じく project() より前に置く。
 # 明示しないと、ビルドしたマシンの macOS 版が下限になる（開発機は 26 系）。
 # Phase 4 T7 の package.deployment_target がこの値を機械で検査する。
@@ -34,6 +46,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(KATACHI_SANITIZE "Enable AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+
+# 配布用の構成（ADR-0015）。release プリセットが ON にする。
+# ON のとき macOS は universal になる（上記。project() より前で効かせている）。
+# T7 で配布物の機械検査 P1〜P8 の登録もこの値で切り替える。
+option(KATACHI_PACKAGE "Configure for distribution (macOS universal binary)" OFF)
 
 # 追加コーデック（ADR-0013）。**既定 OFF のままにする。**
 # 既定パスが常に「追加コーデックが無い環境」になり、docs/phases.md §4 Phase 3 の

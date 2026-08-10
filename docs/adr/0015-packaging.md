@@ -88,8 +88,17 @@ CI に入れ忘れた件（`docs/phases.md` §1.5.1）である。あのとき�
 
 論点 2 と逆の結論になる。理由を書く。
 
-`compile_commands.json` に `-arch` が 2 つ並ぶと clang-tidy が扱えない**恐れがある**
-（`docs/phases.md` §3 の品質ゲート 4 が壊れる）。**この点はまだ実測していない。**
+`compile_commands.json` に `-arch` が 2 つ並ぶと clang-tidy が扱えない
+（`docs/phases.md` §3 の品質ゲート 4 が壊れる）。
+
+> **2026-08-11 に実測した。恐れではなく事実である。**
+> `release` プリセット（`x86_64;arm64`）の `compile_commands.json` に対して
+> `clang-tidy -p build/release` を走らせると、対象 12 ファイルすべてが
+> `error: unable to handle compilation, expected exactly one compiler job`
+> で落ちる（exit 1）。1 つのエントリに x86_64 と arm64 の 2 ジョブが入るためである。
+>
+> **したがって品質ゲート 4 は `build/dev` を指したままにする。**
+> `build/release` を指してはならない。`dev` は native 単独なので通る。
 
 **代わりに、分岐した構成を放置しない手当てを打つ。** CI に `package` ジョブを足し、
 `release` プリセットのビルドと配布物の機械検査（P1〜P8）を**毎 PR で通す。**
@@ -186,8 +195,8 @@ CMake はターゲットの `COMPILE_OPTIONS` を**リソースコンパイラ�
 
 ### 未確認のまま残ること
 
-**universal 構成で clang-tidy が通るかは実測していない**（論点 3）。
-T3 で `release` プリセットを作るときに確かめる。**確かめるまで「通る」と書かない。**
+**削った配布物（`Qt6Network` 等を除いた木）でアプリが起動するか**は未確認である。
+T6 で削り、T7 の P8 が機械で確かめる。**確かめるまで「起動する」と書かない。**
 
 ### 変わらないもの
 
