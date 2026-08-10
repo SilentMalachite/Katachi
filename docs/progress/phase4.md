@@ -463,3 +463,194 @@ Release で測り直したうえで、除外できるものを T6 で決める�
    `WIN32_EXECUTABLE` を明示する必要が実測で確定した**
 3. T3 の完了条件に「MSVC ランタイムがデバッグ版でないこと」を加える（論点 B）
 4. T6 で `windeployqt` の除外オプションを一次情報で確認する（論点 A・C、推測 6）
+
+---
+
+## 2026-08-11 — 論点 A / B に決着（D12・D13）。T2 完了。**テストの欠陥を 1 件直した**
+
+### 実施内容
+
+T1 で立てた論点 A・B を一次情報で調べて決着させ、T2（配布物の形とメタデータ）を実装した。
+その過程で Windows の CI が落ち、**停止条件 4 に該当したため止めて判断を仰ぎ、承認を得て直した。**
+
+### 論点 A の調査結果: **`windeployqt` のフラグでは落とせない**
+
+Qt 公式ドキュメント（`doc.qt.io/qt-6/windows-deployment.html`）のオプション表を確認した。
+文書化されているのは次のとおりで、**特定の Qt モジュールやプラグイン種別を除外する
+オプションは存在しない。**
+
+| 区分 | オプション |
+|---|---|
+| 入出力 | `--dir` `--libdir` `--plugindir` `--qml-deploy-dir` `--translationdir` |
+| ビルド構成 | `--debug` `--release` `--pdb` |
+| 挙動 | `--force` `--dry-run` |
+| 翻訳 | `--translations <languages>` **`--no-translations`** |
+| システム / ランタイム | `--no-system-d3d-compiler` `--no-system-dxc-compiler` `--compiler-runtime` **`--no-compiler-runtime`** `--no-opengl-sw` `--no-ffmpeg` `--force-openssl` `--openssl-root` |
+
+**D12 として決めた**（利用者の承認を得た）。D5 で `install()` + 自前スクリプトを採っているため、
+**`windeployqt` の後に `Qt6Network.dll` / `generic/` / `networkinformation/` / `tls/` を削り、
+削った状態で実際に起動することを機械検査する**（T7 の P8）。フラグに頼らず実測で担保する。
+
+**「アプリはネットワーク通信を行わない」という `README.md` の記述と、配布物の中身を
+食い違わせないための判断である。**
+
+### 論点 B の調査結果: **私の T1 の記述は不正確だった（訂正）**
+
+T1 で「デバッグ版の MSVC ランタイムは再配布できない」と書いた。**これは不正確である。**
+Qt 公式ドキュメントは次のように述べている。
+
+> If the redistributable is not available, windeployqt may fall back to using the compiler's
+> shared runtime DLLs found on the developer machine. **These individual DLLs are not intended
+> or licensed for redistribution, and should not be shipped directly. Only the official
+> Microsoft Redistributable installer should be used for deployment on end-user systems.**
+
+**Release でも、`windeployqt` が置く個々の DLL をそのまま同梱してはならない。**
+デバッグ版に限った話ではなかった。`docs/agent-protocol.md` §5.1 に従い、
+**T1 の記述は書き換えず、ここに訂正として追記する。**
+
+**これは受け入れ基準 2 のポータブル zip の成立性に直接効く。** インストーラは公式の
+再頒布パッケージを実行できるが、zip は展開するだけで実行できない。
+**停止条件 7（ライセンスの判断）として止めて 3 案を示し、D13 の承認を得た。**
+
+`--no-compiler-runtime` で配置し、**zip は「Microsoft Visual C++ 再頒布可能パッケージ (x64)
+が必要」と明記**、インストーラは公式版を実行する。CRT の静的リンク案は採らない
+（Qt の DLL は `/MD` で作られており、CRT を跨ぐと壊れる恐れがある）。
+
+### T2 の実装
+
+| ファイル | 内容 |
+|---|---|
+| `CMakeLists.txt` | `CMAKE_OSX_DEPLOYMENT_TARGET=13.0` を `project()` より前に置く |
+| `CMakeLists.txt` | 警告オプションを `$<$<COMPILE_LANGUAGE:CXX>:…>` で括る |
+| `src/app/CMakeLists.txt` | `OUTPUT_NAME Katachi` / `MACOSX_BUNDLE` / `WIN32_EXECUTABLE` / `Info.plist` / アイコン / `.rc` |
+| `packaging/macos/Info.plist.in`（新規） | バンドルのメタデータ |
+| `packaging/windows/katachi.rc.in`（新規） | アイコンとバージョン資源 |
+| `docs/adr/0015-packaging.md`（新規） | 配布方式の判断 8 件 |
+| `README.md` | 成果物のパスを更新 |
+
+**警告オプションを括った理由を残す。** CMake はターゲットの `COMPILE_OPTIONS` を
+**リソースコンパイラにも渡す**ため、括らないと `rc.exe` が `/W4 /WX` を受け取って落ちる。
+**全ソースが CXX なので、既存ターゲットの警告設定は何も変わらない。**
+
+### 実測（ローカル macOS）
+
+```
+build/dev/src/app/Katachi.app/Contents/Info.plist
+build/dev/src/app/Katachi.app/Contents/MacOS/Katachi
+build/dev/src/app/Katachi.app/Contents/Resources/katachi.icns
+```
+
+| 項目 | 値 |
+|---|---|
+| `CFBundleIdentifier` | `com.silentmalachite.katachi` |
+| `CFBundleShortVersionString` / `CFBundleVersion` | `0.1.0`（`project()` 由来） |
+| `LSMinimumSystemVersion` | `13.0` |
+| `LC_BUILD_VERSION` の `minos` | **`13.0`**（SDK は 26.5） |
+| `@rpath/Qt*` の数 | **4**（動的リンク。受け入れ基準 4 の方向） |
+
+### 承認された計画からの変更（申告 3 件）
+
+1. **実行ファイル名を `katachi` から `Katachi` へ変えた。** 利用者から見える名前であり、
+   T2 の「メタデータ」の範囲と判断した。`README.md` と CI の計測ステップも合わせた
+2. **`docs/adr/0015-packaging.md` を書いた。** T2 の計画ファイル一覧には無かったが、
+   `README.md` から参照しており、決定は ADR に置くという規約に従う
+3. **差分 367 行。うち 197 行は ADR。実装は 170 行**で、申告した見込み 100〜150 行を
+   20 行超えた。**停止条件 8（400 行）には達していない**
+
+`LSApplicationCategoryType` は**意図的に入れていない。** App Store 配布でのみ必須であり、
+分類を選ぶと推測になるため（Phase 4 の「今回やらないこと」に App Store は入っている）。
+
+### CI で落ちたテストと、その対処（**停止条件 4**）
+
+**CI run 31413990271 の Windows ジョブが落ちた。ビルドとリンクは成功している。**
+`WIN32_EXECUTABLE` を付けた実行ファイルは MSVC で正しくリンクされ、`.rc` も通った。
+
+```
+tests/io/large_batch_test.cpp(142): FAILED:
+  REQUIRE( progressSignals < 100 )
+with expansion:
+  103 < 100
+```
+
+**間引きは正しく効いていた。**
+
+| 値 | |
+|---|---|
+| テスト所要 | 24,690 ms |
+| 間引き間隔（`JobRunnerBridge.cpp:37`） | 200 ms |
+| 出しうる上限 | 24,690 / 200 = **123 回** |
+| 実際 | **103 回**（上限内） |
+| `< 100` が暗黙に要求する所要時間 | **20.0 秒以内** |
+
+**同じファイルの検査 2 のコメントが、この欠陥を予言していた。**
+
+> 発火回数はバッチの所要時間に比例するので、速い機械ほど小さくなる。
+> **回数に閾値を置くと「速いから落ちる」テストになる。**
+
+**検査 3 は「回数に閾値を置く」形のままで、向きが逆（遅いから落ちる）だった。**
+
+**期待値を変えたくなったため、停止条件 4 に従って実装前に止め、4 案を示して判断を仰いだ。**
+承認を得た案は「**上限を経過時間から計算する**」である。
+
+```cpp
+const int intervalMs = bridge.progressIntervalMs();   // 数字を二重に書かない
+const auto maxSignals = static_cast<int>(batchMs / intervalMs) + 2;
+REQUIRE(progressSignals <= maxSignals);
+REQUIRE(progressSignals < batchSize);                 // 元の意図を別立てで残す
+```
+
+**期待値を緩めたのではなく、測る対象を仕様（`docs/spec-core.md` §7）に合わせた。**
+2 本目は、上限が経過時間に比例するため極端に遅い機械では 1 件 1 回の実装でも
+通りうることへの手当てであり、**元の検査の意図をそのまま残している。**
+
+**T2 の回帰でないことは実測で確かめた。** 同一コミット `c2ee70d` に対して Windows ジョブを
+再実行したところ **success** した。ローカルでは 0.70 秒で完了し上限が 5 回になるため、
+**速い機械でもこの検査は緩まない。**
+
+### 変更ファイル
+
+- 追加: `packaging/macos/Info.plist.in`、`packaging/windows/katachi.rc.in`、`docs/adr/0015-packaging.md`
+- 変更: `CMakeLists.txt`、`src/app/CMakeLists.txt`、`README.md`、`.github/workflows/ci.yml`、
+  `tests/io/large_batch_test.cpp`、`docs/phases.md`（§5.5 に D12 / D13）、`docs/progress/phase4.md`（本エントリ）
+
+### 追加・変更したテスト
+
+**変更 1 本。** `a batch of 1000 files completes without blocking the main thread` の検査 3。
+期待値は上記のとおり「経過時間から計算した上限以下」かつ「件数未満」。**新規追加は無い。**
+
+### 品質ゲートの実行結果（ローカル macOS 26.6.1 / arm64、Qt 6.11.1、LLVM 22.1.8）
+
+| # | コマンド | 結果 |
+|---|---|---|
+| 1 | `cmake --preset dev` / `cmake --build --preset dev`（**構成からやり直し**） | exit 0 / **警告 0** |
+| 2 | `ctest --preset dev` | **172 / 172 pass** |
+| 3 | `clang-format --dry-run --Werror`（69 ファイル） | **指摘なし** |
+| 4 | `clang-tidy -p build/dev`（12 ファイル） | **指摘 0 件** |
+| 5 | `cmake --build --preset asan` | exit 0 / 警告 0 |
+| 6 | `ctest --preset asan` | **172 / 172 pass** |
+
+CI は `c2ee70d` に対して 5 ジョブ success（Windows は再実行後）。
+**テスト修正後の CI は次のコミットで確認する。**
+
+### 推測で埋めた箇所
+
+**1 件増え、1 件は訂正になった。**
+
+| # | 内容 | 状態 |
+|---|---|---|
+| 5 | universal 構成で clang-tidy が通るか | **未解消。T3 で確かめる** |
+| 6 | `windeployqt` の除外オプションの有無 | **解消**（無い。上記の表） |
+| **7** | **削った状態（`Qt6Network` 等を除いた配布物）でアプリが起動するか** | **新規。未確認。T6 / T7 の P8 で確かめる** |
+
+**T1 の「デバッグ版だから再配布できない」という記述は不正確だった**（上記の訂正）。
+Release でも個々の DLL は同梱できない。
+
+T8 の前提「ローカルの Qt は `~/Qt` 配下にしかない」は依然として未確認である。
+
+### 残課題 / 次にやること
+
+1. テスト修正後の CI を確認する
+2. **T3: `install()` 規則と `release` プリセット。** 完了条件に「配置される MSVC ランタイムが
+   デバッグ版でないこと」ではなく「**個々の CRT DLL を同梱していないこと**」を置く（D13 の訂正を反映）
+3. T3 で universal 構成の clang-tidy を確かめる（推測 5）
+4. T4 で `docs/licenses.md` に MSVC ランタイムの節を起こす（D13）
