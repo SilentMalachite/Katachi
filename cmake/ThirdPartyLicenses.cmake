@@ -32,6 +32,15 @@ string(JSON qt_sbom_version GET "${manifest_json}" "qtVersion")
 string(JSON limitation GET "${manifest_json}" "limitation")
 string(JSON shipped_count LENGTH "${manifest_json}" "shipped")
 
+# SBOM に現れないが同梱されるもの（Qt がビルド済みバイナリとして持つ Mesa など）。
+# **手で管理する受け皿であり、1 件ごとに「なぜ SBOM に無いか」が書いてある。**
+set(extra "${KATACHI_LICENSE_DIR}/extra-components.json")
+set(extra_count 0)
+if(EXISTS "${extra}")
+    file(READ "${extra}" extra_json)
+    string(JSON extra_count LENGTH "${extra_json}" "shipped")
+endif()
+
 # ライセンス式のうち OR を持つものは、**本体の GPLv3-or-later と両立する側を選ぶ**。
 # 選ばなかった側の法文は同梱しない。理由は packaging/licenses/SOURCES.md にもある。
 set(katachi_or_choice
@@ -112,37 +121,86 @@ LGPLv3 は GPLv3 を参照します。GPLv3 の条文は同梱の LICENSE にあ
 # ── 一覧と、必要な法文の収集 ────────────────────────────────────────
 set(needed_ids "")
 set(missing "")
-math(EXPR last "${shipped_count} - 1")
+set(emitted 0)
 
-foreach(index RANGE ${last})
-    string(JSON item GET "${manifest_json}" "shipped" ${index})
-    string(JSON name GET "${item}" "name")
-    string(JSON version GET "${item}" "version")
-    string(JSON expression GET "${item}" "license")
-    string(JSON copyright GET "${item}" "copyright")
-    string(JSON download GET "${item}" "download")
+# 1 件を本文へ書き出す。**JSON をリストに入れない。** 著作権表示に `;` が
+# 含まれると CMake のリストが壊れるため、添字で回して都度取り出す。
+macro(katachi_emit_entry json index)
+    string(JSON _item GET "${${json}}" "shipped" ${index})
+    string(JSON _name GET "${_item}" "name")
+    string(JSON _version GET "${_item}" "version")
+    string(JSON _expression GET "${_item}" "license")
+    string(JSON _copyright GET "${_item}" "copyright")
+    string(JSON _download GET "${_item}" "download")
+    string(JSON _why ERROR_VARIABLE _why_error GET "${_item}" "why_not_in_sbom")
 
-    katachi_resolve_license("${expression}" ids choice_note)
-
-    string(APPEND body "  ${name} (${version})\n")
-    string(APPEND body "    ライセンス: ${expression}\n")
-    if(choice_note)
-        string(APPEND body "                ${choice_note}\n")
-    endif()
-    if(download)
-        string(APPEND body "    入手先:     ${download}\n")
-    endif()
-    string(REPLACE "\n" "\n                " indented "${copyright}")
-    string(APPEND body "    著作権:     ${indented}\n\n")
-
-    foreach(id IN LISTS ids)
-        if(NOT EXISTS "${spdx_dir}/${id}.txt")
-            list(APPEND missing "${id} (${name} が必要とする)")
+    # platforms がある項目は、その配布物にだけ載せる。
+    # 入っていないものを権利表示に並べない（法的な文書なので正確に保つ）。
+    string(JSON _plat_count ERROR_VARIABLE _plat_error LENGTH "${_item}" "platforms")
+    if(NOT _plat_error AND DEFINED KATACHI_PLATFORM)
+        set(_wanted FALSE)
+        math(EXPR _plat_last "${_plat_count} - 1")
+        foreach(_p RANGE ${_plat_last})
+            string(JSON _plat GET "${_item}" "platforms" ${_p})
+            if(_plat STREQUAL "${KATACHI_PLATFORM}")
+                set(_wanted TRUE)
+            endif()
+        endforeach()
+        if(NOT _wanted)
+            set(_skip TRUE)
         else()
-            list(APPEND needed_ids "${id}")
+            set(_skip FALSE)
+        endif()
+    else()
+        set(_skip FALSE)
+    endif()
+
+    if(NOT _skip)
+    math(EXPR emitted "${emitted} + 1")
+    katachi_resolve_license("${_expression}" _ids _choice_note)
+
+    string(APPEND body "  ${_name} (${_version})\n")
+    string(APPEND body "    ライセンス: ${_expression}\n")
+    if(_choice_note)
+        string(APPEND body "                ${_choice_note}\n")
+    endif()
+    if(_download)
+        string(APPEND body "    入手先:     ${_download}\n")
+    endif()
+    string(REPLACE "\n" "\n                " _indented "${_copyright}")
+    string(APPEND body "    著作権:     ${_indented}\n")
+    if(NOT _why_error)
+        string(REPLACE "\n" "\n                " _why_indented "${_why}")
+        string(APPEND body "    SBOM 外:    ${_why_indented}\n")
+    endif()
+    string(APPEND body "\n")
+
+    foreach(_id IN LISTS _ids)
+        if(NOT EXISTS "${spdx_dir}/${_id}.txt")
+            list(APPEND missing "${_id} (${_name} が必要とする)")
+        else()
+            list(APPEND needed_ids "${_id}")
         endif()
     endforeach()
+    endif()
+endmacro()
+
+math(EXPR last "${shipped_count} - 1")
+foreach(index RANGE ${last})
+    katachi_emit_entry(manifest_json ${index})
 endforeach()
+
+if(extra_count GREATER 0)
+    string(APPEND body
+"
+  --- ここから下は Qt の SBOM に現れないもの（手で管理している）---
+
+")
+    math(EXPR extra_last "${extra_count} - 1")
+    foreach(index RANGE ${extra_last})
+        katachi_emit_entry(extra_json ${index})
+    endforeach()
+endif()
 
 # Qt 本体の LGPLv3 も必要。
 if(NOT EXISTS "${spdx_dir}/LGPL-3.0-only.txt")
@@ -189,5 +247,4 @@ endforeach()
 
 list(LENGTH needed_ids id_count)
 file(WRITE "${KATACHI_OUTPUT}" "${body}")
-message(STATUS "third_party_licenses.txt を書き出した: "
-               "第三者 ${shipped_count} 件 / 法文 ${id_count} 種")
+message(STATUS "third_party_licenses.txt を書き出した: 第三者 ${emitted} 件 / 法文 ${id_count} 種")

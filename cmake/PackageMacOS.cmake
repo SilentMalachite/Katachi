@@ -91,6 +91,7 @@ execute_process(
             -DKATACHI_OUTPUT=${contents}/Resources/third_party_licenses.txt
             -DKATACHI_APP_VERSION=${KATACHI_APP_VERSION}
             -DKATACHI_QT_VERSION=${KATACHI_QT_VERSION}
+            -DKATACHI_PLATFORM=macos
             -P "${KATACHI_SOURCE_DIR}/cmake/ThirdPartyLicenses.cmake"
     RESULT_VARIABLE licenses_result)
 if(NOT licenses_result EQUAL 0)

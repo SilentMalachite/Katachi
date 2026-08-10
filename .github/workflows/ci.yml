@@ -144,6 +144,20 @@ jobs:
           cmake --install build/release --prefix build/release/stage > /dev/null
           echo "据え付けた木:"
           find build/release/stage | sed 's|build/release/stage|<prefix>|'
+          echo
+          echo "── (7) Windows の配布物を組み立てる（T6）──"
+          cmake -DKATACHI_STAGE_DIR="$PWD/build/release/stage" \
+                -DKATACHI_SOURCE_DIR="$PWD" \
+                -DKATACHI_QT_PREFIX="$QT_ROOT_DIR" \
+                -DKATACHI_APP_VERSION=0.1.0 \
+                -DKATACHI_QT_VERSION="$QT_VERSION" \
+                -DKATACHI_OUTPUT_ZIP="$PWD/build/release/Katachi-0.1.0-windows-x64.zip" \
+                -P cmake/PackageWindows.cmake
+          echo "-- 配置された内容 --"
+          find build/release/stage -type f | sed 's|build/release/stage|<pkg>|' | sort
+          find build/release/stage -type f | wc -l | xargs echo "ファイル数:"
+          du -sh build/release/stage | awk '{print "大きさ:", $1}'
+          ls -l build/release/*.zip | awk '{print "zip:", $5, $9}'
         shell: bash
 
       # docs/format-matrix.md はビルド時に生成され、内容は実行環境の Qt プラグイン構成で
