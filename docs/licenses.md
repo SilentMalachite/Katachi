@@ -97,6 +97,30 @@ LGPLv3 は、ライブラリ部分を利用者が**差し替えて再リンク�
 | 依存 | ライセンス | 用途 | 成果物への同梱 |
 |---|---|---|---|
 | Catch2 v3 | Boost Software License 1.0 | 単体テスト | **含まれない**（テストバイナリのみ） |
+| Inno Setup | Inno Setup License（修正 BSD 系） | Windows のインストーラ生成（ADR-0015） | **含まれない**（生成物の中身は本プロジェクトの内容） |
+| SPDX license-list-data | CC0-1.0 | `packaging/licenses/spdx/` の法文の取得元 | 法文そのものは**同梱する**（§1.3 / §4） |
+
+### 3.1 MSVC ランタイムは「ビルド時のみ」ではない（**2026-08-11 追記**）
+
+`windeployqt` は既定で MSVC のランタイム DLL（`msvcp140.dll` `vcruntime140.dll` 等）を
+実行ファイルの隣へ複製する。**これは成果物の実行に必要な第三者コードであり、
+本節の「ビルド時のみ」には当たらない。**
+
+**しかし、これらを直接同梱してはならない。** Qt 公式ドキュメント
+（`doc.qt.io/qt-6/windows-deployment.html`）が明示している。
+
+> These individual DLLs are **not intended or licensed for redistribution**, and should not be
+> shipped directly. **Only the official Microsoft Redistributable installer** should be used for
+> deployment on end-user systems.
+
+**したがって `--no-compiler-runtime` を付けて配置しない**（ADR-0016 の D13）。
+
+| 配布物 | 対応 |
+|---|---|
+| Windows のインストーラ | **公式の Microsoft Visual C++ 再頒布可能パッケージ (x64) を実行する** |
+| Windows のポータブル zip | **同梱しない。** 「再頒布可能パッケージが必要」と `README` と同梱の説明に明記する |
+
+**「入っていないのに動くはず」と書かない。必要なら必要と書く。**
 
 ---
 
@@ -117,12 +141,55 @@ libjpeg-turbo・libtiff・libwebp などの第三者ライブラリを内部に�
 `modules: qtimageformats` で明示的に入れている。これを入れないと TIFF / WebP などが
 能力表から丸ごと消える（Phase 1 の CI で実際に起きた）。
 
-**Phase 4 で配布する際、`qtimageformats` を同梱するなら、その中の第三者ライブラリの
-ライセンス文も `third_party_licenses.txt` に含める必要がある。** 同梱しない選択も
-あり得るが、その場合は対応フォーマットが狭くなる。
+### 4.1 実際に同梱するもの（**2026-08-11 に確定。Phase 4 T4**）
 
-**Phase 4 で `third_party_licenses.txt` を作成する際、実際に同梱するプラグインを列挙し、
-対応するライセンス文を収集する。** Phase 0 時点では成果物を配布しないため未着手。
+**`qtimageformats` は同梱する。** 入れないと TIFF / WebP などが能力表から消えるためである。
+
+同梱物は `macdeployqt` / `windeployqt` の出力から**削ったうえで**確定した（ADR-0015 D12）。
+削る理由と経緯は `docs/progress/phase4.md`。
+
+| 区分 | 同梱するもの |
+|---|---|
+| Qt のライブラリ 6 | `QtConcurrent` `QtCore` `QtDBus` `QtGui` `QtSvg` `QtWidgets` |
+| 画像フォーマットのプラグイン | macOS 11 個 / Windows 9 個（`qjp2` `qmacheif` `qmacjp2` は macOS のみ） |
+| その他のプラグイン 3 | `iconengines/qsvgicon` / `platforms`（`qcocoa` または `qwindows`）/ `styles` |
+| **削るもの** | `platforminputcontexts`（仮想キーボード）と、それだけが引く `QtQuick` `QtQml*` `QtVirtualKeyboard*` `QtNetwork` `QtOpenGL` の 9 つ |
+
+**削る理由。** 仮想キーボードのプラグイン 1 つが 8 フレームワークを引き込み、その中に
+`QtQuick`（**ADR-0001 は Qt Quick 不採用と決めている**）と `QtNetwork`
+（**`README.md` はネットワーク通信を行わないと明記している**）が含まれていた。
+**配布物の中身を、明文化した決定と食い違わせない。** 82 MB → 52 MB になった。
+
+### 4.2 第三者コードの列挙は Qt の SBOM から機械的に行う
+
+Qt 6.8 以降は SPDX 2.3 形式の SBOM を同梱している。
+**Qt のバイナリ配布物にライセンス文は含まれていない**ことを実測したため、
+公式ドキュメントを人が読み写すのではなく、この SBOM を典拠にする。
+
+| ファイル | 役割 |
+|---|---|
+| `packaging/licenses/from-qt-sbom.py` | SBOM から同梱物が含む第三者コードを推移的に列挙する |
+| `packaging/licenses/qt-third-party.json` / `.md` | その生成物。**成果物に入るもの 43 件** |
+| `packaging/licenses/fetch-spdx-texts.py` | 標準 SPDX 識別子の法文を正本から取得する |
+| `packaging/licenses/spdx/` | 取得した法文 **22 種**（`LicenseRef-*` 3 種は SBOM 由来） |
+| `packaging/licenses/SOURCES.md` | 出所・取得日・sha256・`OR` 式の選択理由 |
+| `cmake/ThirdPartyLicenses.cmake` | `third_party_licenses.txt` を組み立てる。**法文が 1 つでも欠けたら `FATAL_ERROR`** |
+
+Qt 公式も次のように述べており、この方針と一致する。
+
+> You only need to acknowledge and comply with the licenses of the third-party components
+> that you are **actually shipping** with your application.
+
+### 4.3 この列挙の限界（**偽らないために書く**）
+
+**機械で確かめられるのは「SBOM に記載がある範囲」までである。**
+
+`QtCore` の中に静的に取り込まれた第三者コードは、配布物にファイルとして現れない。
+したがって**「配布物のファイル一覧」からは検出できず**、Qt の SBOM の正確さに依存する。
+
+同じ理由で、Phase 4 T7 の機械検査 P5 が確かめるのは
+**「配布物に入っている各ファイルに対応する記載があるか」**であって、
+**「一覧が完全か」ではない。** この区別を報告でも崩さない。
 
 ---
 
