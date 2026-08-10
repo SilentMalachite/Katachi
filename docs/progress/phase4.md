@@ -654,3 +654,94 @@ T8 の前提「ローカルの Qt は `~/Qt` 配下にしかない」は依然�
    デバッグ版でないこと」ではなく「**個々の CRT DLL を同梱していないこと**」を置く（D13 の訂正を反映）
 3. T3 で universal 構成の clang-tidy を確かめる（推測 5）
 4. T4 で `docs/licenses.md` に MSVC ランタイムの節を起こす（D13）
+
+---
+
+## 2026-08-11 — T3 完了。**推測 5 が「恐れ」から「事実」に変わった**
+
+### 実施内容
+
+据え付け規則（`install()`）と `release` プリセットを入れた。**受け入れ基準 1 の
+universal binary が両環境で成立することを実測で確かめた。**
+
+### 推測 5 の解消: **universal 構成では clang-tidy が動かない**
+
+T0 から「`-arch` が 2 つ並ぶと clang-tidy が扱えない**恐れがある**」と書いてきた。
+**実測した。恐れではなく事実だった。**
+
+```
+$ clang-tidy -p build/release $(git ls-files 'src/*.cpp')
+error: unable to handle compilation, expected exactly one compiler job in
+  ' "/usr/bin/c++" "-cc1" "-triple" "x86_64-apple-macosx13.0.0" ... ;
+    "/usr/bin/c++" "-cc1" "-triple" "arm64-apple-macosx13.0.0"  ... ; '
+exit: 1（対象 12 ファイルすべて）
+```
+
+1 エントリに x86_64 と arm64 の 2 ジョブが入るためである。
+
+**これは D7（universal は `release` プリセットだけ）の判断が正しかったことの裏付けである。**
+`docs/adr/0015-packaging.md` 論点 3 の「恐れがある。まだ実測していない」を実測に置き換え、
+**「品質ゲート 4 は `build/dev` を指したままにする。`build/release` を指してはならない」**
+と明記した。
+
+### 実測（受け入れ基準 1 と、据え付けの形）
+
+| | ローカル macOS 26.6.1 / Qt 6.11.1 | CI macOS 14 / **Qt 6.8.3** | CI Windows / Qt 6.8.3 |
+|---|---|---|---|
+| `lipo -archs` | **`x86_64 arm64`** | **`x86_64 arm64`** | — |
+| 据え付けた木 | `<prefix>/Katachi.app/Contents/{Info.plist, MacOS/Katachi, Resources/katachi.icns}` | 同左 | **`<prefix>/Katachi.exe`** |
+| `minos` | 13.0 | — | — |
+
+**CI の Qt 6.8.3 でも universal になった。** T1 で `QtCore` が universal だと分かっていたが、
+**実際にアプリが universal にリンクできるかは別の話**であり、ここで確かめた。
+
+### 承認された計画からの変更（申告 2 件）
+
+1. **Windows の据え付け先を `bin/Katachi.exe` から `Katachi.exe`（接頭辞の直下）へ変えた。**
+   計画では `bin/` を挟むと書いていた。T1 の実測で `windeployqt` が DLL を
+   **実行ファイルの隣**に並べることが分かったため、階層を挟まない形にした
+2. **CI の一時的な計測ステップに `release` のビルドと据え付けを足した。**
+   **ローカルは macOS しかないため、Windows の据え付けはこれが唯一の検証である。**
+   T7 で恒久の `package` ジョブに置き換えるときに削除する
+
+### 変更ファイル
+
+- 変更: `CMakeLists.txt`（`KATACHI_PACKAGE` と universal 化）、`CMakePresets.json`（`release`）、
+  `src/app/CMakeLists.txt`（`install()`）、`.github/workflows/ci.yml`、
+  `docs/adr/0015-packaging.md`（論点 3 を実測に置換）、`docs/progress/phase4.md`（本エントリ）
+
+### 追加・変更したテスト
+
+**なし。** 配布物の機械検査 P1〜P8 は T7 で入れる。
+`KATACHI_PACKAGE` は T7 でその登録の切り替えにも使う。
+
+### 品質ゲートの実行結果
+
+| 構成 | 結果 |
+|---|---|
+| `dev` | 警告 **0** / **172 / 172 pass** / clang-format 指摘なし / clang-tidy（`build/dev`）**指摘 0** |
+| `asan` | 警告 0 / **172 / 172 pass** |
+| **`release`（新規）** | **172 / 172 pass**（universal バイナリで実行） |
+| `dev-codecs` | **172 / 172 pass**（Phase 3 の回帰） |
+| CI run 31416085139 | **5 ジョブすべて success** |
+
+差分 **80 行**（申告した見込み 80〜120 行の範囲内）。
+
+### 推測で埋めた箇所
+
+**1 件のみになった。**
+
+| # | 内容 | 状態 |
+|---|---|---|
+| 5 | universal 構成で clang-tidy が通るか | **解消。通らない**（上記） |
+| 7 | 削った配布物（`Qt6Network` 等を除いた木）でアプリが起動するか | **未確認。T6 で削り、T7 の P8 が確かめる** |
+
+T8 の前提「ローカルの Qt は `~/Qt` 配下にしかない」は依然として未確認である。
+
+### 残課題 / 次にやること
+
+1. **T4: 第三者ライセンス文の収集と `third_party_licenses.txt`。** D8 のとおり
+   **同梱物から機械的に列挙する**ため、まず `macdeployqt` を実際に走らせて
+   macOS 側の同梱物を実測する（Windows は T1 の 68 ファイルの実測がある）
+2. **T4 の結論は停止条件 7 に該当する。** 同梱一覧と法文を提示して承認を得てから T5 / T6 へ進む
+3. T4 で `docs/licenses.md` §3 に MSVC ランタイムの節を起こす（D13）
