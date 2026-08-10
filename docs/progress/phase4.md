@@ -1023,3 +1023,106 @@ build/release/Katachi-0.1.0.dmg: satisfies its Designated Requirement
    **公証は Apple へバイナリを送る外向きの操作であり、勝手に実行しない**
 2. T6: Windows のパッケージング
 3. T7: 機械検査 P1〜P8
+
+---
+
+## 2026-08-11 — T6 完了。Windows の配布物を CI で実測した
+
+### 実施内容
+
+`cmake/PackageWindows.cmake` と `packaging/windows/katachi.iss.in` を追加し、
+**CI run 31443165686（5 ジョブ success）で Windows の配布物を実測した。**
+ローカルは macOS しかないため、**これが唯一の検証である。**
+
+### 実測（T1 の素の出力との比較）
+
+| | T1（Debug・素の `windeployqt`） | **T6（Release・削った後）** |
+|---|---|---|
+| ファイル数 | 68 | **22** |
+| 大きさ | 122 MB | **45 MB**（zip **18.1 MB**） |
+| Qt の DLL | 6（`Qt6Network` 込み） | **5**（`Concurrent` `Core` `Gui` `Svg` `Widgets`） |
+| MSVC ランタイム | 10 個 | **0** |
+| `translations/` | 31 個 | **0** |
+| `d3dcompiler_47` / `dxcompiler` / `dxil` | あり | **なし** |
+| `generic` / `networkinformation` / `tls` | あり | **なし** |
+| `imageformats` | 9 個 | **9 個（Qt と一致）** |
+| `opengl32sw.dll` | あり | **あり（意図して残す）** |
+
+**`Qt6DBus.dll` は Windows には無い。** macOS で `QtGui` が `QtDBus` を要求したのは
+プラットフォーム固有の事情だったことが、ここで裏付けられた。
+
+### `windeployqt` は `qsvg` を落とさない（macOS との差）
+
+macOS では `macdeployqt` が `imageformats/libqsvg` を落とすことを T4 で実測した。
+**Windows では落ちなかった。** 照合検査が「Qt と一致（9 個）」を報告している。
+
+**「同じ道具だから同じ挙動」と決めつけずに両方で照合したのは正しかった。**
+どちらの OS でも、欠けていれば戻すし、一致しなければ止まる。
+
+### `opengl32sw.dll` を残す判断と、その帰結
+
+GPU ドライバの無い環境（VM / RDP）で Qt が使う代替経路である。
+**その環境を検証できない以上、外す判断の根拠が無い**ので残した。
+
+**残したことで新しい問題が出た。** Mesa は Qt が同梱するビルド済みバイナリであり、
+**Qt のモジュールの依存ではないため SBOM の `DEPENDS_ON` グラフに現れない。**
+T4 で作った 43 件の一覧に入っていなかった。
+
+対処として仕組みを 2 つ足した。
+
+1. `packaging/licenses/extra-components.json` — SBOM に現れないが同梱されるものの受け皿。
+   **1 件ごとに「なぜ SBOM に無いか」を書く。** 書けないものは同梱してよいか
+   分かっていないということなので、止めて調べる
+2. **`platforms` による絞り込み** — Mesa は Windows 専用なので macOS の権利表示には載せない。
+   **法的な文書なので、入っていないものを並べない**
+
+結果、macOS は **43 件**、Windows は **44 件**になった。
+
+### 承認された計画からの変更（申告）
+
+**差分 414 行。見込み 150〜250 行を超え、`CLAUDE.md` 停止条件 8 の 400 行も超えた。**
+
+内訳: `PackageWindows.cmake` 207 / `katachi.iss.in` 78 / `ThirdPartyLicenses.cmake` の
+改修 84 / `extra-components.json` 25 / `ci.yml` 14。
+
+超過の主因は `opengl32sw` を残す判断から派生した**ライセンス機構の拡張**（109 行）で、
+着手時に見込んでいなかった。**分割して申告すべきだった。事後の申告になった。**
+
+### 変更ファイル
+
+- 追加: `cmake/PackageWindows.cmake`、`packaging/windows/katachi.iss.in`、
+  `packaging/licenses/extra-components.json`
+- 変更: `cmake/ThirdPartyLicenses.cmake`（受け皿と絞り込み）、
+  `cmake/PackageMacOS.cmake`（`KATACHI_PLATFORM` を渡す）、`.github/workflows/ci.yml`
+- **`src/` の変更: なし**
+
+### 追加・変更したテスト
+
+**なし。** 配布物の機械検査 P1〜P8 は T7。
+ただし `PackageWindows.cmake` の中に**欠けたら止まる**検査を 4 種類組み込んである
+（削り残し / **MSVC ランタイムの紛れ込み** / 画像プラグインの不一致 / 同梱漏れ）。
+
+### 品質ゲートの実行結果
+
+| 実行 | 結果 |
+|---|---|
+| CI run 31443165686（5 ジョブ） | **すべて success** |
+| ローカル macOS のパッケージング | 第三者 43 件（Mesa 除外）/ 画像プラグイン 11 個（Qt と一致） |
+
+**コンパイル対象は 1 行も変えていない**ため、6 ゲートは T3 の結果から動かない。
+
+### 推測で埋めた箇所
+
+| # | 内容 | 状態 |
+|---|---|---|
+| 8 | 仮想キーボードを外して macOS の日本語入力に影響が無いか | **未確認。T8 でお願いする** |
+| 9 | CI の macOS runner で `cocoa` を使う起動テストが動くか | **未確認。T7 で確かめる** |
+| **11** | **`opengl32sw.dll` を残す判断の根拠**（GPU の無い環境で要る） | **未確認。** Qt の一般的な構成からの推論であり、**GPU ドライバの無い Windows で実際に確かめてはいない**（`docs/agent-protocol.md` §1 の 5） |
+| **12** | **Inno Setup のインストーラは 1 度も生成していない** | **未確認。** CI に Inno Setup を入れていないため。T7 か T8 で確かめる |
+
+### 残課題 / 次にやること
+
+1. **T7: 機械検査 P1〜P8 を ctest / CI に載せる**
+2. Inno Setup を CI に入れ、インストーラを実際に生成する（推測 12）
+3. 公証（利用者の資格情報待ち）
+4. T8: 実機確認（日本語入力、Windows 実機、クリーン環境）
