@@ -12,8 +12,15 @@
 | 項目 | 内容 |
 |---|---|
 | ライセンス | **GNU General Public License v3.0 or later**（全文は `LICENSE`） |
-| 対象 | `src/` `tests/` `cmake/` および本リポジトリのドキュメント |
+| 対象 | `src/` `tests/` `cmake/` `tools/` **`packaging/`**（ただし §1.3 の除外あり）および本リポジトリのドキュメント |
 | 著作権者 | Silent Malachite（`git log` の実測で単独） |
+
+**`LICENSE` は gnu.org の GPLv3 正本であり、改変しない。**
+
+**2026-08-11 に対象へ `packaging/` と `tools/` を追記した。** Phase 4 でアプリアイコン
+（`packaging/icons/`）と配布用のテンプレート（`packaging/macos/` `packaging/windows/`）を
+追加したのに、対象の一覧が `src/` `tests/` `cmake/` のままで、**新しく書いた著作物が
+どの条件で配布されるのか宙に浮いていた。** `tools/` は Phase 1 からある取りこぼしである。
 
 **2026-08-09 に Apache License 2.0 から変更した。** 判断の記録は
 `docs/adr/0012-license-gplv3.md`。変更時点で未リリースであり、影響を受ける利用者はいない。
@@ -31,15 +38,37 @@
 **貢献も GPLv3-or-later で配布される**（`CONTRIBUTING.md` §6）。
 GPL と両立しないライセンスのコードは受け入れられない。
 
+### 1.3 本体のライセンスの対象外（第三者の法文）
+
+**`packaging/licenses/` に置くファイルは、本体のライセンスの対象ではない。**
+
+ここに入るのは Qt および Qt が内部に含む第三者ライブラリの**ライセンス文そのもの**であり、
+他者の著作物である。配布時に成果物へ同梱する義務を果たすために、原文のまま置いている。
+
+- **改変しない。** 表記の統一や翻訳も行わない
+- **本体の GPLv3 を主張しない。** 各ファイルの条件はそのファイル自身が定める
+- 取得元の URL と取得日は `packaging/licenses/SOURCES.md` に記録する
+
+同じ理由で、`docs/format-matrix.md`（ビルド時の生成物）も本体の著作物ではあるが
+自動生成であり、手で編集しない。
+
 ---
 
 ## 2. Qt 6
 
 | 項目 | 内容 |
 |---|---|
-| 使用モジュール | `Qt6::Core` / `Qt6::Gui` / `Qt6::Widgets`（Phase 2 で `Qt6::Concurrent` を追加予定） |
+| **リンクするモジュール** | `Qt6::Concurrent` / `Qt6::Core` / `Qt6::Gui` / `Qt6::Widgets`（`CMakeLists.txt` の `find_package` と一致） |
+| **同梱するが直接は使わないモジュール** | `QtDBus`（`QtGui` が参照する）/ `QtSvg`（SVG のプラグインが参照する） |
 | 採用ライセンス | **LGPL v3** |
 | リンク形態 | **動的リンクのみ。静的リンクは行わない** |
+
+**2026-08-11 に「同梱するが直接は使わないモジュール」の行を足した。** Phase 4 T4 で
+`macdeployqt` の出力を実測したところ、本体がリンクしていない 2 つが配布物に入ることが
+分かったためである。`QtDBus` は削ると `QtGui` の読み込みに失敗して起動しない
+（実測。`docs/progress/phase4.md`）。
+
+**同梱する以上、この 2 つも LGPLv3 の条件の対象である。** §4 の一覧に含める。
 
 ### 2.1 なぜ動的リンクに限定するのか
 
