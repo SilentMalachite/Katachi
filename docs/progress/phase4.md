@@ -745,3 +745,134 @@ T8 の前提「ローカルの Qt は `~/Qt` 配下にしかない」は依然�
    macOS 側の同梱物を実測する（Windows は T1 の 68 ファイルの実測がある）
 2. **T4 の結論は停止条件 7 に該当する。** 同梱一覧と法文を提示して承認を得てから T5 / T6 へ進む
 3. T4 で `docs/licenses.md` §3 に MSVC ランタイムの節を起こす（D13）
+
+---
+
+## 2026-08-11 — T4 前半: 同梱物を実測した。**削る範囲が想定よりずっと大きかった**
+
+### 実施内容
+
+D8（同梱物から機械的に列挙する）に従い、ライセンス文を集める**前に**、
+`macdeployqt` を実際に走らせて macOS の同梱物を確定させた。
+**その過程で 3 件の問題を見つけ、うち 2 件は起動テストが暴いた。**
+
+### 実測 1: `macdeployqt` の素の出力は **82 MB / 79 ファイル / 15 フレームワーク**
+
+**本体が直接必要とするのは 4 つだけである。**
+
+```
+$ otool -L Katachi.app/Contents/MacOS/Katachi | grep -oE "Qt[A-Za-z]+\.framework"
+QtConcurrent QtCore QtGui QtWidgets
+```
+
+**残り 11 のうち 8 を、たった 1 つのプラグインが引いていた。**
+
+| プラグイン | 引き込むもの |
+|---|---|
+| `platforminputcontexts/libqtvirtualkeyboardplugin.dylib` | **QtNetwork / QtOpenGL / QtQml / QtQmlMeta / QtQmlModels / QtQmlWorkerScript / QtQuick / QtVirtualKeyboard / QtVirtualKeyboardQml** |
+
+**これは明文化された 2 つの決定と食い違う。**
+
+- **ADR-0001 は「Qt Quick 不採用」**と決めているのに、配布物に `QtQuick`（12 MB）と `QtQml`（9.7 MB）が入る
+- **`README.md` は「アプリはネットワーク通信を一切行わない」**と書いているのに `QtNetwork`（3.3 MB）が入る
+
+D12 を承認いただいたときの説明は「`Qt6Network` と TLS を削る」だったが、**実際の規模が
+違う**ため、範囲を提示して判断を仰ぎ、**「仮想キーボードごと削る」で承認を得た。**
+
+### 実測 2: **`macdeployqt` は `imageformats/libqsvg` を落とす**
+
+```
+Qt 側の imageformats: 11 個 / バンドル側: 10 個
+バンドルに無いもの: libqsvg
+```
+
+**配布物だけ SVG が読めなくなる。** `docs/format-matrix.md` は svg / svgz を
+読める形式として載せているので、**「静かに対応形式が減る」という Phase 1 と同じ事故**である。
+理由は調べていない（`macdeployqt` の判断）。**T5 で明示的に複製して戻す。**
+
+複製した `libqsvg.dylib` は既に `@rpath/QtSvg.framework/...` を参照しており、
+バンドル内の他のプラグイン（`libqtiff.dylib` 等）と同じ形なので、
+**`install_name_tool` による書き換えは要らない**（実測）。
+
+**受け入れ基準 3 の機械検査 P4 は、まさにこれを捕まえるためにある。**
+
+### 実測 3: **`QtDBus` は必要だった。静的な調査では見落とし、起動テストが暴いた**
+
+`otool -L` を回して「`QtDBus` を参照しているものは無い」と判断し、削って起動したところ
+即座に落ちた。
+
+```
+dyld[50421]: Library not loaded: @rpath/QtDBus.framework/Versions/A/QtDBus
+  Referenced from: .../Frameworks/QtGui.framework/Versions/A/QtGui
+```
+
+**`QtGui` が `QtDBus` を参照している。** 私の調査手順に漏れがあった。
+
+> **これは P8（削った状態で実際に起動する）が要る理由そのものである。**
+> 静的な参照調査は間違えうる。**起動させると間違えようがない。**
+
+### 実測 4: **`QT_QPA_PLATFORM=offscreen` は配布物では使えない**
+
+削った木を `offscreen` で起動しようとして落ちた。
+
+```
+qt.qpa.plugin: Could not find the Qt platform plugin "offscreen" in ""
+```
+
+**`macdeployqt` は実際に要る `cocoa` だけを入れる。** `offscreen` はバンドルに無い。
+
+**T0 で書いた P8 の期待値（`QT_QPA_PLATFORM=offscreen` で起動）は配布物には適用できない。**
+**計画の変更として申告する。** P8 の期待値を次のとおり改める。
+
+| | 旧（T0 の計画） | 新 |
+|---|---|---|
+| 起動条件 | `QT_QPA_PLATFORM=offscreen` | **配布物に実際に入っているプラットフォーム（macOS は `cocoa`）** |
+| 環境 | Qt 関連の環境変数を除く | 同左（`env -i` で最小の環境にする） |
+| 判定 | 5 秒生存し SIGTERM で終了。標準エラーに `Library not loaded` / `could not find or load the Qt platform plugin` が出ない | **同左（変更なし）** |
+
+**CI の macOS runner で `cocoa` が起動できるかは未確認である。** T7 で確かめる。
+駄目なら P8 は「ローカルで実行して結果を記録する検査」に格下げし、そう明記する。
+
+### 削った結果（**起動を確認済み**）
+
+```
+$ env -i HOME=... PATH=/usr/bin:/bin ./Katachi.app/Contents/MacOS/Katachi
+  5 秒生存: OK / 標準エラー: (空)
+```
+
+| | 大きさ | ファイル数 | フレームワーク |
+|---|---|---|---|
+| `macdeployqt` の素の出力 | 82 MB | 79 | 15 |
+| **削った後** | **52 MB** | **43** | **6** |
+
+**残すフレームワーク 6**: `QtConcurrent` `QtCore` **`QtDBus`** `QtGui` `QtSvg` `QtWidgets`
+**残すプラグイン 14**: `iconengines/qsvgicon` / `imageformats` 11 個（`qsvg` を戻した後）/
+`platforms/qcocoa` / `styles/qmacstyle`
+
+**削るもの**: `platforminputcontexts/`（仮想キーボード）と、それだけが引く
+`QtQuick` `QtQml` `QtQmlMeta` `QtQmlModels` `QtQmlWorkerScript`
+`QtVirtualKeyboard` `QtVirtualKeyboardQml` `QtNetwork` `QtOpenGL` の 9 フレームワーク。
+
+### 推測で埋めた箇所
+
+| # | 内容 | 状態 |
+|---|---|---|
+| 7 | 削った配布物でアプリが起動するか | **解消。起動する**（上記の実測） |
+| **8** | **仮想キーボードを外して macOS の日本語入力に影響が無いか** | **新規。未確認。** macOS の IME は `cocoa` プラグインが担うため影響しないと考えているが、**これは Qt の一般的な慣習からの推論であり、実機で日本語を打って確かめていない**（`docs/agent-protocol.md` §1 の 5）。**T8 で利用者に確認をお願いする** |
+| **9** | **CI の macOS runner で `cocoa` を使う起動テストが動くか** | **新規。未確認。T7 で確かめる** |
+
+**`macdeployqt` が `libqsvg` を落とす理由は調べていない。** 事実として確定しているのは
+「落とす」ことだけである。
+
+### 変更ファイル
+
+**なし。** ここまでは実測のみで、コードも構成も変更していない
+（削る作業は T5 の `cmake/PackageMacOS.cmake` で実装する）。
+
+### 残課題 / 次にやること
+
+1. **T4 後半: 上の同梱物一覧に対応するライセンス文を一次情報から集める。**
+   対象は Qt 6 の 6 フレームワークと 14 プラグイン、および Windows 側（T1 の実測の 68 ファイルから
+   D12 / D13 で削った後の一覧）
+2. **T4 の結論は停止条件 7 に該当する。** 一覧と法文を提示して承認を得てから T5 / T6 へ進む
+3. T5 で削る処理と `libqsvg` の復元を `cmake/PackageMacOS.cmake` に実装する
