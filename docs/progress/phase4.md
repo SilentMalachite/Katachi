@@ -876,3 +876,93 @@ $ env -i HOME=... PATH=/usr/bin:/bin ./Katachi.app/Contents/MacOS/Katachi
    D12 / D13 で削った後の一覧）
 2. **T4 の結論は停止条件 7 に該当する。** 一覧と法文を提示して承認を得てから T5 / T6 へ進む
 3. T5 で削る処理と `libqsvg` の復元を `cmake/PackageMacOS.cmake` に実装する
+
+---
+
+## 2026-08-11 — T4 完了 / T5 は署名の手前まで。**署名がキーチェーンで止まる**
+
+### T4: 第三者ライセンスの収集（承認を得た）
+
+**Qt 6.8 以降が同梱する SPDX 2.3 の SBOM を典拠にした。** 当初は公式ドキュメントを
+人が読み写す計画だったが、SBOM のほうが機械可読で確実である。Qt 公式も
+「実際に同梱するものだけを対象にすればよい」と述べており、D8 の方針と一致する。
+
+| ファイル | 役割 |
+|---|---|
+| `packaging/licenses/from-qt-sbom.py` | SBOM から第三者コードを `DEPENDS_ON` の推移閉包で列挙。`LicenseRef-*` の法文も書き出す |
+| `packaging/licenses/fetch-spdx-texts.py` | 標準 SPDX 識別子の法文を正本から取得（**curl を使う。python.org 版 Python は CA 証明書を持たず urllib が失敗する。実測**） |
+| `packaging/licenses/spdx/` | 法文 **22 種**（標準 19 + SBOM 由来 3） |
+| `packaging/licenses/SOURCES.md` | 出所・取得日・sha256・`OR` 式の選択理由 |
+| `cmake/ThirdPartyLicenses.cmake` | `third_party_licenses.txt` を組み立てる。**法文が欠けたら `FATAL_ERROR`** |
+
+**最初の抽出は不完全だった。** `*_Attribution_*` だけを拾って `Bundled*` を取りこぼし、
+`QJpegPlugin` に何も出ていなかった。推移閉包に直して 34 → **43 件**になった。
+**私が「機械検査では完全性を証明できない」と申告した取りこぼしの実例である。**
+
+**GPLv3 との非両立は 1 件も出なかった。** `OR` 式 3 件は両立する側を選んだ
+（`FTL OR GPL-2.0-only` → **FTL**。GPL-2.0-only は本体の GPLv3 と両立しない）。
+
+生成結果は **1,489 行 / 128 KB / 第三者 43 件 / 法文 22 種**。
+`MIT.txt` を退避して、検査が実際に `FATAL_ERROR` で止まることを確認した。
+
+### T5: 組み立てと `.dmg` はできた
+
+`cmake/PackageMacOS.cmake` が次を行う。**すべて実測で確認した。**
+
+1. `macdeployqt` を実行
+2. **削る**（仮想キーボードと、それだけが引く 9 フレームワーク）
+3. **`macdeployqt` が落とす `imageformats/libqsvg` を戻す**（実行ログに出た）
+4. `third_party_licenses.txt` と `LICENSE` を `Contents/Resources/` へ
+5. 削り忘れ・画像プラグインの欠落・同梱物の不足を検査（欠けたら止まる）
+6. 署名（任意）/ 7. `.dmg`（任意）
+
+| 成果物 | 実測 |
+|---|---|
+| `Katachi.app` | **52 MB** / フレームワーク 6 / 画像プラグイン **11 個（Qt と一致）** / `x86_64 arm64` |
+| `Katachi-0.1.0.dmg` | **24 MB**。`Katachi.app` / `Applications` / `LICENSE` / `third_party_licenses.txt` |
+
+### **署名がキーチェーンで止まる（実測。ここで止まって依頼する）**
+
+`codesign` に Developer ID を渡すと **10 分経っても終わらない。**
+**`--timestamp` を外しても止まる**ので、タイムスタンプサーバの問題ではない。
+**秘密鍵へのアクセス許可のダイアログを待っている**と考えられる。
+
+非対話のシェル（CI、エディタの統合端末、エージェント）からは進められない。
+**利用者が端末から 1 度手で実行し、ダイアログで「常に許可」を選ぶ必要がある。**
+手順は `docs/release.md` §2.1 に書いた。
+
+**公証はさらに資格情報（App Store Connect の API キー、またはアプリ用パスワード）が要る。**
+これも利用者にお願いする項目である。手順は `docs/release.md` §3。
+
+### 変更ファイル
+
+- 追加: `cmake/PackageMacOS.cmake`、`cmake/ThirdPartyLicenses.cmake`、
+  `packaging/licenses/*`（スクリプト 2 / 生成物 2 / 法文 22 / SOURCES.md）、`docs/release.md`
+- 変更: `docs/licenses.md`（§1 対象、§1.3 第三者法文、§2 モジュール、§3.1 MSVC、§4.1〜4.3）
+- **`LICENSE` は無変更**（`main` と md5 一致を確認）
+
+### 追加・変更したテスト
+
+**なし。** 配布物の機械検査 P1〜P8 は T7。
+ただし `PackageMacOS.cmake` と `ThirdPartyLicenses.cmake` の中に、
+**欠けたら止まる**検査を組み込んである（違反を作って落ちることを確認済み）。
+
+### 品質ゲートの実行結果
+
+`release` プリセットのビルドと据え付けは通っている（T3 で確認済み、変更なし）。
+**コンパイル対象は 1 行も変えていない**ため、6 ゲートは T3 の結果から動かない。
+
+### 推測で埋めた箇所
+
+| # | 内容 | 状態 |
+|---|---|---|
+| 8 | 仮想キーボードを外して macOS の日本語入力に影響が無いか | **未確認。T8 で実機確認をお願いする** |
+| 9 | CI の macOS runner で `cocoa` を使う起動テストが動くか | **未確認。T7 で確かめる** |
+| 10 | **署名が止まる理由がキーチェーンの許可待ちであること** | **未確認。** `--timestamp` の有無で挙動が変わらないことから絞り込んだ推論であり、**ダイアログを目で見て確かめていない** |
+
+### 残課題 / 次にやること
+
+1. **署名: 利用者に `docs/release.md` §2.1 を実行してもらう**（キーチェーンで「常に許可」）
+2. **公証: 資格情報の保存（`docs/release.md` §3.1）をお願いする**
+3. T6: Windows のパッケージング
+4. T7: 機械検査 P1〜P8
