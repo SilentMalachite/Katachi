@@ -51,7 +51,16 @@ set_tests_properties(package.install PROPERTIES FIXTURES_SETUP katachi_installed
 set_tests_properties(package.build PROPERTIES FIXTURES_REQUIRED katachi_installed
                                               FIXTURES_SETUP katachi_packaged)
 
-set(KATACHI_PACKAGE_CHECKS P1 P2 P3 P4 P5 P6 P7 P8)
+set(KATACHI_PACKAGE_CHECKS P1 P2 P3 P4 P5 P6 P7 P8 P9)
+
+# **P8（実際に起動する）は macOS でのみ意味がある。**
+# Windows のローダーは DLL が欠けたときエラーダイアログを出してプロセスを
+# 生かしたまま待つため、「5 秒生存した」が「起動した」の根拠にならない
+# （CI run 31446352005 の違反フィクスチャが暴いた）。
+# Windows の起動可能性は P9（依存がすべて配布物の中で解決する）が担う。
+if(NOT APPLE)
+    list(REMOVE_ITEM KATACHI_PACKAGE_CHECKS P8)
+endif()
 
 # P2 / P3 は macOS 固有（universal / minos）。Windows では検査自体が
 # 対象外として素通りするため、違反フィクスチャも作らない。

@@ -278,6 +278,88 @@ elseif(KATACHI_CHECK STREQUAL "P8")
     endif()
     message(STATUS "P8: Qt の環境変数なしで 5 秒生存した")
 
+# ── P9: 動的依存がすべて配布物の中で解決する ─────────────────────────
+#
+# **P8 は Windows では成立しない。** DLL が見つからないとき、Windows の
+# ローダーはエラーダイアログを出してプロセスを生かしたまま待つ。5 秒生存しても
+# 「起動した」ことにならない（CI run 31446352005 の違反フィクスチャが暴いた）。
+#
+# ここでは実際に起動させず、**同梱物が参照する非システムライブラリが
+# すべて配布物の中にあるか**を確かめる。T4 で QtDBus を見落とした
+# 静的調査の失敗も、こう書けば防げる。
+elseif(KATACHI_CHECK STREQUAL "P9")
+    if(platform STREQUAL "macos")
+        file(GLOB_RECURSE binaries "${app}/Contents/MacOS/*" "${plugin_root}/*.dylib"
+             "${app}/Contents/Frameworks/*/Versions/A/Qt*")
+        set(frameworks_dir "${app}/Contents/Frameworks")
+    else()
+        file(GLOB_RECURSE binaries "${root}/*.exe" "${root}/*.dll")
+        set(system_dir "$ENV{SystemRoot}/System32")
+        if(NOT IS_DIRECTORY "${system_dir}")
+            message(FATAL_ERROR "System32 が見つからない: ${system_dir}")
+        endif()
+    endif()
+
+    list(LENGTH binaries binary_count)
+    if(binary_count LESS 5)
+        message(FATAL_ERROR "検査対象が少なすぎる (${binary_count})。走査が空振りしている")
+    endif()
+
+    set(unresolved "")
+    set(checked 0)
+    foreach(binary IN LISTS binaries)
+        if(IS_DIRECTORY "${binary}" OR IS_SYMLINK "${binary}")
+            continue()
+        endif()
+        if(platform STREQUAL "macos")
+            execute_process(COMMAND otool -L "${binary}" OUTPUT_VARIABLE deps
+                            ERROR_QUIET RESULT_VARIABLE code)
+            if(NOT code EQUAL 0)
+                continue()   # Mach-O でないもの
+            endif()
+            math(EXPR checked "${checked} + 1")
+            # @rpath/<なにか> が配布物の Frameworks に無ければ未解決。
+            string(REGEX MATCHALL "@rpath/[^ \t\r\n]+" refs "${deps}")
+            foreach(ref IN LISTS refs)
+                string(REPLACE "@rpath/" "" relative "${ref}")
+                if(NOT EXISTS "${frameworks_dir}/${relative}")
+                    list(APPEND unresolved "${binary} -> ${ref}")
+                endif()
+            endforeach()
+        else()
+            execute_process(COMMAND dumpbin -dependents "${binary}"
+                            OUTPUT_VARIABLE deps ERROR_QUIET RESULT_VARIABLE code)
+            if(NOT code EQUAL 0)
+                continue()
+            endif()
+            math(EXPR checked "${checked} + 1")
+            string(REGEX MATCHALL "[A-Za-z0-9_.+-]+\\.dll" refs "${deps}")
+            get_filename_component(binary_dir "${binary}" DIRECTORY)
+            foreach(ref IN LISTS refs)
+                # System32 にあるものはシステム DLL。それ以外は配布物に要る。
+                if(EXISTS "${system_dir}/${ref}")
+                    continue()
+                endif()
+                if(EXISTS "${root}/${ref}" OR EXISTS "${binary_dir}/${ref}")
+                    continue()
+                endif()
+                list(APPEND unresolved "${binary} -> ${ref}")
+            endforeach()
+        endif()
+    endforeach()
+
+    if(checked LESS 5)
+        message(FATAL_ERROR "実際に調べられたのは ${checked} 件。走査が空振りしている")
+    endif()
+    if(unresolved)
+        list(REMOVE_DUPLICATES unresolved)
+        string(REPLACE ";" "\n  - " pretty "${unresolved}")
+        message(FATAL_ERROR
+                "配布物の中で解決しない依存がある:\n  - ${pretty}\n"
+                "**この配布物は起動しない。**")
+    endif()
+    message(STATUS "P9: ${checked} 件の依存がすべて配布物の中で解決した")
+
 else()
     message(FATAL_ERROR "未知の検査: ${KATACHI_CHECK}")
 endif()

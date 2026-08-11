@@ -98,7 +98,7 @@ elseif(KATACHI_CHECK STREQUAL "P7")
         file(WRITE "${docs}/third_party_licenses.txt" "${text}")
     endif()
 
-elseif(KATACHI_CHECK STREQUAL "P8")
+elseif(KATACHI_CHECK STREQUAL "P8" OR KATACHI_CHECK STREQUAL "P9")
     # 起動に要るライブラリを落とす。**T4 で QtDBus を消して実際に起きた壊れ方。**
     if(platform STREQUAL "macos")
         file(REMOVE "${work}/Katachi.app/Contents/Frameworks/QtDBus.framework/Versions/A/QtDBus")
