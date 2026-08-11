@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    Katachi のアプリアイコン（原版）。これが唯一の出所であり、
+    katachi.icns / katachi.ico は build.sh がここから作る。
+
+    意匠: 角丸の四角＝「かたち」。それを斜めに断ち、二片を断面に沿って
+          ずらす。同じかたちが別のかたちへ組み直される瞬間を、
+          一つの図形で表す（このアプリがしていることそのもの）。
+
+    方針: アニメーション・独自テーマを持たないアプリなので、
+          装飾を足さない。地の階調のみ、光沢や影は入れない。
+          小さい寸法では断面が閉じて素の四角に戻る。それでよい。
+
+    寸法: 全面 1024。角丸 230（22.5%）。版面 492 を中央に置き、
+          断ちは水平から -27 度。直交方向に ±19、断面に沿って ∓38 ずらす。
+          macOS 用は build.sh が 824/1024 に収めて余白を付ける。
+  -->
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2C4A7C"/>
+      <stop offset="1" stop-color="#16233F"/>
+    </linearGradient>
+
+    <rect id="sq" x="266" y="266" width="492" height="492" rx="58" ry="58"/>
+
+    <!-- 断ちの線で分けた半平面。版面より十分大きく取る。 -->
+    <clipPath id="lower">
+      <polygon points="1581.2,-32.8 -557.2,1056.8 169.2,2482.4 2307.6,1392.8"/>
+    </clipPath>
+    <clipPath id="upper">
+      <polygon points="1581.2,-32.8 -557.2,1056.8 -1283.6,-368.8 854.8,-1458.4"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1024" height="1024" rx="230" ry="230" fill="url(#plate)"/>
+
+  <!-- 内側で切り、外側でずらす。順序を逆にすると切り口から中身がはみ出す。 -->
+  <g fill="#F2F4F8">
+    <g transform="translate(-25.2,34.2)">
+      <g clip-path="url(#lower)"><use href="#sq"/></g>
+    </g>
+    <g transform="translate(25.2,-34.2)">
+      <g clip-path="url(#upper)"><use href="#sq"/></g>
+    </g>
+  </g>
+</svg>

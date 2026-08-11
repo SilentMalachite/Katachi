@@ -1,0 +1,78 @@
+; Katachi の Windows インストーラ（Inno Setup）。
+; cmake/PackageWindows.cmake が configure_file(@ONLY) で展開する。
+; 値の出所は project() 一つだけにする（ADR-0015 D11）。ここに版を直接書かない。
+;
+; **コード署名は行わない**（ADR-0015 論点 5）。SmartScreen の警告が出る。
+
+#define AppName        "Katachi"
+#define AppVersion     "@KATACHI_APP_VERSION@"
+#define AppPublisher   "Silent Malachite"
+#define AppURL         "https://github.com/SilentMalachite/Katachi"
+#define AppExeName     "Katachi.exe"
+
+[Setup]
+AppId={{9F2A6C7E-3B41-4E58-9C0D-7A1E5D8B2F60}
+AppName={#AppName}
+AppVersion={#AppVersion}
+AppVerName={#AppName} {#AppVersion}
+AppPublisher={#AppPublisher}
+AppPublisherURL={#AppURL}
+AppSupportURL={#AppURL}/issues
+AppUpdatesURL={#AppURL}/releases
+VersionInfoVersion={#AppVersion}
+
+; CLAUDE.md: 対象 OS は Windows 10 以上（x64）。
+MinVersion=10.0
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+
+DefaultDirName={autopf}\{#AppName}
+DefaultGroupName={#AppName}
+DisableProgramGroupPage=yes
+; 管理者権限を要求しない。{autopf} は非管理者なら {localappdata}\Programs へ向く。
+PrivilegesRequiredOverridesAllowed=dialog
+
+; 本体は GPLv3-or-later。導入前に条文を見せる。
+LicenseFile=@KATACHI_STAGE_DIR@\LICENSE
+InfoAfterFile=@KATACHI_STAGE_DIR@\README.txt
+
+OutputDir=@KATACHI_OUTPUT_DIR@
+OutputBaseFilename={#AppName}-{#AppVersion}-setup
+SetupIconFile=@KATACHI_SOURCE_DIR@\packaging\icons\katachi.ico
+UninstallDisplayIcon={app}\{#AppExeName}
+Compression=lzma2/max
+SolidCompression=yes
+WizardStyle=modern
+
+[Languages]
+Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
+Name: "english";  MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; \
+    GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[Files]
+; 据え付けた木をそのまま入れる。中身は PackageWindows.cmake が検査済み。
+Source: "@KATACHI_STAGE_DIR@\*"; DestDir: "{app}"; \
+    Flags: ignoreversion recursesubdirs createallsubdirs
+
+; **MSVC 再頒布可能パッケージ。個々の DLL を同梱してはならない**（ADR-0016 D13）。
+; Qt 公式が「公式の Microsoft 再頒布インストーラのみを使え」と明示している。
+; 事前に packaging/windows/ へ置いた場合だけ同梱して実行する。
+Source: "@KATACHI_SOURCE_DIR@\packaging\windows\vc_redist.x64.exe"; \
+    DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist
+
+[Icons]
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+
+[Run]
+; 再頒布パッケージを先に入れる。既に新しい版が入っていれば Microsoft 側が何もしない。
+Filename: "{tmp}\vc_redist.x64.exe"; \
+    Parameters: "/install /passive /norestart"; \
+    StatusMsg: "Microsoft Visual C++ 再頒布可能パッケージを確認しています..."; \
+    Flags: waituntilterminated skipifdoesntexist
+
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; \
+    Flags: nowait postinstall skipifsilent

@@ -114,10 +114,15 @@ TEST_CASE("a batch of 1000 files completes without blocking the main thread",
     });
     QTimer::singleShot(waitLimitMs, &loop, &QEventLoop::quit);
 
+    // バッチの所要時間。検査 3 の上限をここから計算する。
+    QElapsedTimer batchClock;
+
+    batchClock.start();
     sinceLastTick.start();
     poll.start(pollIntervalMs);
     bridge.start(request);
     loop.exec();
+    const qint64 batchMs = batchClock.elapsed();
     poll.stop();
 
     REQUIRE(finished);
@@ -138,8 +143,22 @@ TEST_CASE("a batch of 1000 files completes without blocking the main thread",
     REQUIRE(ticks >= 1);
     REQUIRE(maxGapMs < maxAllowedGapMs);
 
-    // 3. 進捗シグナルは件数分は飛ばない（200ms 間引き。docs/spec-core.md §7）。
-    REQUIRE(progressSignals < 100);
+    // 3. 進捗シグナルは 200ms の間引きを守る（docs/spec-core.md §7）。
+    //
+    // **上限は経過時間から計算する。** 回数に固定の閾値を置くと、上の 2 と同じ理由で
+    // 「遅い機械だから落ちる」テストになる。実際 Windows の CI で落ちた（Phase 4 T2）:
+    // バッチが 24.7 秒かかり、間引きが正しく効いた結果の 103 回が `< 100` に触れた。
+    // 24.7 秒 / 200ms = 123 回まではありうるので、仕様は満たされていた。
+    //
+    // 間隔は JobRunnerBridge が持つ値をそのまま読む。同じ数字を二重に書かない。
+    const int intervalMs = bridge.progressIntervalMs();
+    REQUIRE(intervalMs > 0);
+    const auto maxSignals = static_cast<int>(batchMs / intervalMs) + 2; // 端数と開始・終了の分
+    REQUIRE(progressSignals <= maxSignals);
+
+    // 件数ごとには飛ばない。上の上限は経過時間に比例するため、極端に遅い機械では
+    // 1 件 1 回の実装でも通りうる。**元の検査の意図をここに別立てで残す。**
+    REQUIRE(progressSignals < batchSize);
 
     // 4. 同時確保量が予算を超えない（ADR-0008）。0 なら予算を通っていない＝検証になっていない。
     REQUIRE(bridge.peakBudgetUnits() > 0);

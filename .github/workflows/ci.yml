@@ -180,6 +180,75 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
 
+  package:
+    name: 配布物 (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS
+            os: macos-14
+            qt_arch: clang_64
+          - label: Windows
+            os: windows-2022
+            qt_arch: win64_msvc2022_64
+
+    # release プリセット（macOS は universal / KATACHI_PACKAGE=ON）を毎 PR で通す。
+    # **「リリース時だけ通る構成」を作らないため**（ADR-0015 論点 3）。
+    # 署名と公証はローカルでのみ行う（同 論点 4）。ここは未署名の成果物までを作る。
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: MSVC 開発環境を設定
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Ninja を導入
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install ninja; else choco install ninja -y --no-progress; fi
+        shell: bash
+
+      - name: Qt ${{ env.QT_VERSION }} を導入
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: ${{ matrix.qt_arch }}
+          modules: qtimageformats
+          cache: true
+
+      # インストーラを実際に生成するために入れる（ADR-0015 論点 6）。
+      # **無くてもジョブは通る**（PackageWindows.cmake が任意扱いにしている）。
+      - name: Inno Setup を導入
+        if: runner.os == 'Windows'
+        run: choco install innosetup -y --no-progress
+
+      - name: 構成とビルド
+        run: |
+          cmake --preset release
+          cmake --build --preset release
+
+      # package.* は組み立てから検査まで（違反フィクスチャを含む）を行う。
+      #
+      # **正規表現に \ を使わない。** Windows の既定シェルは pwsh で、
+      # bash と違い "\\." がそのまま ctest へ渡り 1 件も一致しなかった
+      # （実測。ctest は「テストが 0 件」で非ゼロ終了するため気づけた）。
+      # shell: bash も明示して、両 OS で同じ解釈にする。
+      - name: 配布物の組み立てと機械検査
+        run: ctest --preset release -R "^package" --output-on-failure
+        shell: bash
+
+      # **未署名である。** 配布してはならない（docs/release.md）。
+      - name: 成果物を取り出す
+        uses: actions/upload-artifact@v4
+        with:
+          name: katachi-unsigned-${{ matrix.label }}
+          path: |
+            build/release/Katachi-*.dmg
+            build/release/Katachi-*.zip
+            build/release/Katachi-*-setup.exe
+          if-no-files-found: error
+
   sanitizers:
     name: ASan + UBSan (macOS)
     runs-on: macos-14

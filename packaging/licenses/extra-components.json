@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "Qt の SBOM に現れないが、配布物に入る第三者コード。**手で管理する。**",
+    "",
+    "from-qt-sbom.py は Qt のモジュール／プラグインが *含む* 第三者コードを",
+    "SBOM から列挙する。しかし Qt には、モジュールの依存としてではなく",
+    "**ビルド済みバイナリとして同梱されるもの**があり、それは SBOM の",
+    "DEPENDS_ON グラフに現れない。ここはその受け皿である。",
+    "",
+    "**1 件ごとに『なぜ SBOM に無いのか』を書く。** 書けないものは、",
+    "そもそも同梱してよいか分かっていないということなので、止めて調べる。",
+    "`platforms` は、その項目が入る配布物を限る（省略時は全て）。"
+  ],
+  "shipped": [
+    {
+      "name": "Mesa 3D (opengl32sw.dll)",
+      "version": "unknown",
+      "license": "MIT",
+      "via": [
+        "Windows の配布物"
+      ],
+      "copyright": "Copyright (C) 1999-2007 Brian Paul   All Rights Reserved.\nCopyright (C) 2010 LunarG Inc.\nand other Mesa contributors",
+      "download": "https://www.mesa3d.org/",
+      "why_not_in_sbom": "Qt が Windows 向けにビルド済みバイナリとして同梱する llvmpipe (Mesa) であり、Qt のモジュールの依存ではないため SBOM の DEPENDS_ON グラフに現れない。GPU ドライバの無い環境（VM / RDP）で Qt が使う代替経路であり、外すとその環境で動くかどうかを検証できないまま賭けることになるため残す。",
+      "verified": "2026-08-11 に windeployqt の出力（Phase 4 T1、CI run 31412328017）で opengl32sw.dll が配置されることを実測した。版は Qt の同梱物のため不明。",
+      "platforms": [
+        "windows"
+      ]
+    }
+  ]
+}

@@ -202,10 +202,26 @@ CLAUDE.md の「絶対禁止」を機械化したもの。人手のレビュー�
 
 ### Phase 4
 - [ ] macOS: universal binary、`macdeployqt` 済み、署名・公証済み `.dmg`
-- [ ] Windows: `windeployqt` 済み、ポータブル zip + インストーラ
-- [ ] 成果物に `third_party_licenses.txt` が同梱されている
-- [ ] Qt を動的リンクしていることを `otool -L` / `dumpbin /dependents` で確認済み
+- [x] Windows: `windeployqt` 済み、ポータブル zip + インストーラ
+- [x] 成果物に `third_party_licenses.txt` が同梱されている
+- [x] Qt を動的リンクしていることを `otool -L` / `dumpbin /dependents` で確認済み
 - [ ] クリーンな環境（Qt 未インストール）で起動を確認済み
+
+**根拠**（2026-08-11、`phase4` ブランチ。詳細は `docs/progress/phase4.md`）
+
+| 基準 | 状態 | 根拠 |
+|---|---|---|
+| 1 | **未達** | universal・`macdeployqt`・**Developer ID 署名までは達成**（`lipo -archs` が `x86_64 arm64`、`codesign --verify --deep --strict` が exit 0、22 件すべてに hardened runtime + secure timestamp）。**公証を実施していない。** 資格情報が未取得のため。`spctl` は `Unnotarized Developer ID` を返す — 公証前の正しい状態である |
+| 2 | **達成** | CI run 31455251987 の artifact に `Katachi-0.1.0-windows-x64.zip`（18 MB）と `Katachi-0.1.0-setup.exe`（14 MB）が実在する。`windeployqt` の出力は 68 ファイル / 122 MB（Debug・素）から **22 ファイル / 45 MB**（Release・削った後）になった |
+| 3 | **達成** | macOS は `Contents/Resources/` と `.dmg` 直下、Windows は配布物直下に `third_party_licenses.txt`（1,489 行 / 128 KB / 第三者 43〜44 件 / 法文 22 種）。**機械検査 P5・P6 が両 OS で検証**し、法文が 1 つでも欠ければ生成時に `FATAL_ERROR` で止まる |
+| 4 | **達成** | **機械検査 P1** が両 OS で検証する。macOS は `otool -L` に `@rpath/Qt*.framework` が 4 件、Windows は `dumpbin -dependents` に `Qt6{Core,Gui,Widgets,Concurrent}.dll`。違反フィクスチャで空振りしないことも確認済み |
+| 5 | **未達** | **機械的な代替**は用意した（macOS は P8 が Qt の環境変数を除いた環境で起動、Windows は P9 が依存解決を検査）。**しかし真のクリーン環境での実機起動を確認していない。** `CLAUDE.md` のとおり、CI の成功や自動テストの結果を実機起動の根拠にしない |
+
+**未達 2 件は、いずれも利用者の環境と資格情報を要する項目である。**
+公証は App Store Connect の資格情報が要り、実機確認は Qt を持たない macOS の
+ユーザーアカウントと Windows の実機が要る。手順は `docs/release.md` §3 と §5。
+
+**Phase 0〜2 のチェックボックスは未更新のままである**（Phase 3 と同じ扱い）。
 
 ---
 
@@ -257,3 +273,36 @@ Phase 3 着手時（2026-08-09）に計画として提示し、承認を得た�
 | D6 | EXIF 全体保持（ADR-0003 の宿題） | **Phase 3 では見送る。** 受け入れ基準 3 項目に含まれず、外部 EXIF ライブラリは本体が**リンク**するため「オプショナル依存」の枠に収まらない | ADR-0014 |
 
 **D3 だけが未確定である。** 確定するまで HEIF 関連の依存を導入しない。
+
+### 5.5 Phase 4 着手時に決める
+
+Phase 4 着手時（2026-08-11）に計画として提示し、承認を得た決定。
+経緯は `docs/progress/phase4.md`、根拠は該当 ADR に置く。
+
+| # | 論点 | 決定 | 記録先 |
+|---|---|---|---|
+| D1 | 署名・公証の実行場所 | **ローカルのみ。** 証明書と公証資格情報を GitHub に置かない。CI は未署名の成果物までを作る。**CI の成功を署名済み成果物の根拠として報告しない** | ADR-0015 |
+| D2 | Windows の検証環境 | **実機あり・コード署名なし。** SmartScreen 警告を README に明記する。Phase 2 から残る「Windows 実機起動 未確認」も併せて解消する | ADR-0015 |
+| D3 | 追加コーデックの同梱 | **同梱しない（`KATACHI_EXTRA_CODECS` は既定 OFF のまま）。** Homebrew の libavif / libjxl / LibRaw は arm64 単独で universal binary を壊す。Windows も未対応（ADR-0013） | ADR-0015 |
+| D4 | Windows インストーラ | **Inno Setup。** CMake の下限 3.24（Phase 0 の決定）を上げずに済む。`.iss` を自前で持つ | ADR-0015 |
+| D5 | パッケージング方式 | **`install()` 規則 + `cmake -P` スクリプト。CPack を使わない。** macOS は macdeployqt → 署名 → dmg → 公証 → staple の順序に割り込む必要があり、Windows は D4 により CPack の必然性が無い。`cmake/CollectExtraCodecs.cmake`（構成時に確定しない情報をビルド後に実測する形）を踏襲する | ADR-0015 |
+| D6 | `MACOSX_BUNDLE` の適用範囲 | **dev / asan も含め常時 ON。** 配布形と開発形を分けると、リリース時にしか通らない構成ができる。§1.5.1 の `qtimageformats` の事故（ローカル green / CI だけ落ちる）と同じ形を作らない | ADR-0015 |
+| D7 | universal 化の適用範囲 | **`release` プリセットのみ**（`x86_64;arm64`）。代わりに **CI へ `package` ジョブを足して release 構成を毎 PR で通す**ことで「リリース時だけ通る構成」を作らない | ADR-0015 |
+| D8 | 第三者ライセンス文の集め方 | **同梱物から機械的に列挙する。** Qt のバイナリインストールに法文が含まれないことを実測したため、一次情報から集めて `packaging/licenses/` に置き、**「成果物に入っているもの」⊆「法文がある項目」を機械検査する**（欠けたら失敗） | ADR-0016 |
+| D9 | GPLv3 §6 の対応ソース提供 | **リリースにソース tarball（`git archive`）を添付し、`third_party_licenses.txt` と README に入手先を書く。** 公開リポジトリへの URL だけに頼らない | ADR-0016 |
+| D10 | LGPLv3 §4 の再リンク可能性 | 動的リンクで満たす（§2.1）。加えて **Qt の版・入手先・利用者が Qt を差し替えられる旨**を同梱文書に書く。**署名済み `.app` はフレームワーク差し替えで署名が壊れるため、再署名手順も併記する** | ADR-0016 |
+| D11 | バージョンの出所 | **`project(VERSION)` を単一の出所**とし、`Info.plist` / `.rc` / `.iss` / 成果物名をすべてそこから生成する。一致を機械検査する | ADR-0015 |
+
+**T1 の実測を受けて追加した決定**（2026-08-11。経緯は `docs/progress/phase4.md`）。
+
+| # | 論点 | 決定 | 記録先 |
+|---|---|---|---|
+| D12 | `windeployqt` が入れる `Qt6Network` / `tls` / `networkinformation` / `generic` の扱い | **配置後に削り、削った状態で起動することを機械検査する（P8）。** Qt 公式ドキュメントのオプション表を確認したが、**特定の Qt モジュールやプラグイン種別を除外するオプションは文書化されていない。** D5（`install()` + 自前スクリプト）を採っているため、配置後に整える形で実現できる。**「アプリはネットワーク通信を行わない」という `README.md` の記述と配布物の中身を食い違わせない** | ADR-0015 |
+| D13 | MSVC ランタイムの同梱 | **`--no-compiler-runtime` で配置し、個々の DLL を同梱しない。** ポータブル zip は「Microsoft Visual C++ 再頒布可能パッケージ (x64) が必要」と明記し、インストーラは公式の再頒布パッケージを実行する。Qt 公式ドキュメントが「**これらの個々の DLL は再頒布を意図・許諾されておらず、直接同梱してはならない。エンドユーザ環境への配布には公式の Microsoft 再頒布インストーラのみを使うこと**」と述べているため（`CLAUDE.md` 停止条件 7 として判断を仰ぎ、承認を得た） | ADR-0016 |
+
+**D13 は `docs/licenses.md` §3 の訂正を伴う。** 同節は「ビルド時のみの依存」を Catch2 だけと
+書いているが、**MSVC ランタイムは成果物の実行に必要な第三者コード**である。T4 で節を起こす。
+
+**アプリアイコンの未決は解消した**（2026-08-11。`packaging/icons/`）。
+
+新たに未解決事項が生じた場合はここに追記する。**推測で埋めず、決めた根拠を ADR に残すこと。**

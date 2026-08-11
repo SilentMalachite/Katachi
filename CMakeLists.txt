@@ -15,6 +15,25 @@ if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_SYSROOT)
     endif()
 endif()
 
+# 配布用の構成（ADR-0015）。**既定 OFF。** release プリセットだけが ON にする。
+#
+# universal 化を release だけに限る理由（ADR-0015 論点 3）: dev を universal にすると
+# compile_commands.json に -arch が 2 つ並び、品質ゲートの clang-tidy が扱えなくなる
+# 恐れがある。分岐した構成を放置しないよう、CI の package ジョブが release を毎回通す。
+#
+# KATACHI_PACKAGE はプリセットが -D で渡すため、project() より前でも cache から読める。
+# option() の宣言は project() の後にある（既定値の記録と、T7 の検査の切り替えのため）。
+if(CMAKE_HOST_APPLE AND KATACHI_PACKAGE AND NOT DEFINED CMAKE_OSX_ARCHITECTURES)
+    set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "macOS universal binary")
+endif()
+
+# CLAUDE.md: 対象 OS は macOS 13 以上。SDK と同じく project() より前に置く。
+# 明示しないと、ビルドしたマシンの macOS 版が下限になる（開発機は 26 系）。
+# Phase 4 T7 の package.deployment_target がこの値を機械で検査する。
+if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "macOS deployment target")
+endif()
+
 project(
     Katachi
     VERSION 0.1.0
@@ -27,6 +46,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(KATACHI_SANITIZE "Enable AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+
+# 配布用の構成（ADR-0015）。release プリセットが ON にする。
+# ON のとき macOS は universal になる（上記。project() より前で効かせている）。
+# T7 で配布物の機械検査 P1〜P8 の登録もこの値で切り替える。
+option(KATACHI_PACKAGE "Configure for distribution (macOS universal binary)" OFF)
 
 # 追加コーデック（ADR-0013）。**既定 OFF のままにする。**
 # 既定パスが常に「追加コーデックが無い環境」になり、docs/phases.md §4 Phase 3 の
@@ -41,11 +65,18 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Widgets)
 
 # 警告設定は INTERFACE ターゲットで配る。FetchContent で取得する第三者コード
 # （Catch2）へ -Werror を波及させないため、グローバルフラグにはしない。
+#
+# COMPILE_LANGUAGE:CXX で括る理由: Phase 4 T2 で Windows のリソース (.rc) を
+# katachi のソースに加えた。CMake は target の COMPILE_OPTIONS を RC コンパイラにも
+# 渡すため、括らないと rc.exe が /W4 /WX を受け取って落ちる。
+# **全ソースが CXX なので、既存ターゲットの警告設定は何も変わらない。**
 add_library(katachi_warnings INTERFACE)
 if(MSVC)
-    target_compile_options(katachi_warnings INTERFACE /W4 /WX /permissive-)
+    target_compile_options(katachi_warnings INTERFACE
+                           $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /permissive->)
 else()
-    target_compile_options(katachi_warnings INTERFACE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(katachi_warnings INTERFACE
+                           $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic -Werror>)
 endif()
 
 # docs/phases.md §3: ASan + UBSan は macOS / Linux が対象。
@@ -73,3 +104,7 @@ add_subdirectory(src/app)
 add_subdirectory(tests)
 
 include(cmake/FormatMatrix.cmake)
+
+# 配布物の機械検査 P1〜P8（Phase 4 T7）。KATACHI_PACKAGE=ON のときだけ登録する。
+# add_subdirectory(tests) より後に読む。install() 規則が確定してから使うため。
+include(cmake/PackageChecks.cmake)
