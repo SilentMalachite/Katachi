@@ -104,3 +104,7 @@ add_subdirectory(src/app)
 add_subdirectory(tests)
 
 include(cmake/FormatMatrix.cmake)
+
+# 配布物の機械検査 P1〜P8（Phase 4 T7）。KATACHI_PACKAGE=ON のときだけ登録する。
+# add_subdirectory(tests) より後に読む。install() 規則が確定してから使うため。
+include(cmake/PackageChecks.cmake)

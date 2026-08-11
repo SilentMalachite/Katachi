@@ -1,0 +1,3 @@
+dyld[81545]: Library not loaded: @rpath/QtDBus.framework/Versions/A/QtDBus
+  Referenced from: <443C9E16-7128-336A-BE65-29E95F6E9852> /private/tmp/pkgbroken/Katachi.app/Contents/Frameworks/QtGui.framework/Versions/A/QtGui
+  Reason: tried: '/private/tmp/pkgbroken/Katachi.app/Contents/Frameworks/QtGui.framework/Versions/A/../../../QtDBus.framework/Versions/A/QtDBus' (no such file), '/private/tmp/pkgbroken/Katachi.app/Contents/Frameworks/QtWidgets.framework/Versions/A/../../../QtDBus.framework/Versions/A/QtDBus' (no such file), '/private/tmp/pkgbroken/Katachi.app/Contents/Frameworks/QtDBus.framework/Versions/A/QtDBus' (no such file), '/private/tmp/pkgbroken/Katachi.app/Contents/Frameworks/QtDBus.framework/Versions/A/QtDBus' (no such file)
