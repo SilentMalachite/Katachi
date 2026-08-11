@@ -19,10 +19,27 @@ set(KATACHI_PACKAGE_SCAN "${PROJECT_SOURCE_DIR}/tests/packaging/scan_package.cma
 # Qt の接頭辞。P4 が「Qt に入っている画像プラグイン」と突き合わせるために要る。
 get_filename_component(KATACHI_QT_PREFIX "${Qt6_DIR}/../../.." ABSOLUTE)
 
+# 成果物そのもの（.dmg / zip / インストーラ）まで作らせる。**組み立てだけ
+# 確かめて配布形式を作らないと、そこが未検証のまま残る**（推測 12 の反省）。
+# 署名と公証はローカルでのみ行うため、ここで作るものは未署名である。
 if(APPLE)
     set(katachi_package_script "${PROJECT_SOURCE_DIR}/cmake/PackageMacOS.cmake")
+    set(katachi_package_extra
+        -DKATACHI_OUTPUT_DMG=${CMAKE_BINARY_DIR}/Katachi-${PROJECT_VERSION}-unsigned.dmg)
 elseif(WIN32)
     set(katachi_package_script "${PROJECT_SOURCE_DIR}/cmake/PackageWindows.cmake")
+    set(katachi_package_extra
+        -DKATACHI_OUTPUT_ZIP=${CMAKE_BINARY_DIR}/Katachi-${PROJECT_VERSION}-windows-x64.zip
+        -DKATACHI_OUTPUT_DIR=${CMAKE_BINARY_DIR})
+    # Inno Setup があればインストーラも作る。無ければ作らない（任意の道具）。
+    find_program(KATACHI_ISCC NAMES ISCC
+                 HINTS "C:/Program Files (x86)/Inno Setup 6" "C:/Program Files/Inno Setup 6")
+    if(KATACHI_ISCC)
+        list(APPEND katachi_package_extra -DKATACHI_ISCC=${KATACHI_ISCC})
+        message(STATUS "Inno Setup: ${KATACHI_ISCC}")
+    else()
+        message(STATUS "Inno Setup が見つからない。インストーラは作らない")
+    endif()
 else()
     message(STATUS "配布物の検査は macOS / Windows のみ")
     return()
@@ -40,6 +57,7 @@ add_test(NAME package.build
                  -DKATACHI_QT_PREFIX=${KATACHI_QT_PREFIX}
                  -DKATACHI_APP_VERSION=${PROJECT_VERSION}
                  -DKATACHI_QT_VERSION=${Qt6_VERSION}
+                 ${katachi_package_extra}
                  -P "${katachi_package_script}")
 
 # install したものを組み立ての入力にする。ctest から cmake --install を呼ぶ。

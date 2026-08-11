@@ -30,18 +30,24 @@ cmake --preset release
 cmake --build --preset release
 ctest --preset release --output-on-failure
 
-rm -rf build/release/stage
-cmake --install build/release --prefix build/release/stage
+rm -rf build/release/dist
+cmake --install build/release --prefix build/release/dist
 ```
 
 `release` プリセットは macOS を universal（`x86_64;arm64`）にする。
+
+> **配布用の置き場を `dist` にする理由（実測した落とし穴）。**
+> `ctest --preset release` の `package.build` は、**署名なしで**組み立てを
+> `build/release/package` へ行う（CI で署名しない設計上、正しい動作）。
+> 同じ置き場を使うと、テストを走らせた瞬間に署名済みの成果物が
+> 未署名で上書きされる。**実際に一度そうなった。** 置き場を分ける。
 
 ---
 
 ## 2. 配布物を組み立てる
 
 ```bash
-cmake -DKATACHI_STAGE_DIR="$PWD/build/release/stage" \
+cmake -DKATACHI_STAGE_DIR="$PWD/build/release/dist" \
       -DKATACHI_SOURCE_DIR="$PWD" \
       -DKATACHI_QT_PREFIX="$(qmake6 -query QT_INSTALL_PREFIX)" \
       -DKATACHI_APP_VERSION=0.1.0 \
@@ -122,20 +128,31 @@ xcrun stapler staple build/release/Katachi-0.1.0.dmg
 ## 4. 検証（**結果を `docs/progress/phase4.md` に貼る**）
 
 ```bash
+# 公証の事前条件（**提出前にこれを確かめる。落ちてから理由を読むより速い**）
+#   Developer ID / flags=0x10000(runtime) / Timestamp= の 3 つが全バイナリに要る
+for f in build/release/dist/Katachi.app/Contents/Frameworks/*.framework \
+         build/release/dist/Katachi.app/Contents/PlugIns/*/*.dylib \
+         build/release/dist/Katachi.app/Contents/MacOS/Katachi \
+         build/release/dist/Katachi.app; do
+  codesign -dv --verbose=2 "$f" 2>&1 | grep -qE "flags=0x10000\(runtime\)" || echo "NG: $f"
+done
+# get-task-allow が付いていると公証は拒否される（0 件であること）
+codesign -d --entitlements - build/release/dist/Katachi.app 2>&1 | grep -c get-task-allow
+
 # 署名が正しいか
-codesign --verify --deep --strict --verbose=2 build/release/stage/Katachi.app
+codesign --verify --deep --strict --verbose=2 build/release/dist/Katachi.app
 
 # Gatekeeper が受け入れるか
-spctl --assess --type execute --verbose=2 build/release/stage/Katachi.app
+spctl --assess --type execute --verbose=2 build/release/dist/Katachi.app
 
 # staple が効いているか
 xcrun stapler validate build/release/Katachi-0.1.0.dmg
 
 # Qt が動的リンクか（受け入れ基準 4）
-otool -L build/release/stage/Katachi.app/Contents/MacOS/Katachi | grep '@rpath/Qt'
+otool -L build/release/dist/Katachi.app/Contents/MacOS/Katachi | grep '@rpath/Qt'
 
 # universal か（受け入れ基準 1）
-lipo -archs build/release/stage/Katachi.app/Contents/MacOS/Katachi
+lipo -archs build/release/dist/Katachi.app/Contents/MacOS/Katachi
 ```
 
 **実行していない検証を「通った」と書かない。**

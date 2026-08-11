@@ -217,6 +217,12 @@ jobs:
           modules: qtimageformats
           cache: true
 
+      # インストーラを実際に生成するために入れる（ADR-0015 論点 6）。
+      # **無くてもジョブは通る**（PackageWindows.cmake が任意扱いにしている）。
+      - name: Inno Setup を導入
+        if: runner.os == 'Windows'
+        run: choco install innosetup -y --no-progress
+
       - name: 構成とビルド
         run: |
           cmake --preset release
@@ -232,11 +238,15 @@ jobs:
         run: ctest --preset release -R "^package" --output-on-failure
         shell: bash
 
+      # **未署名である。** 配布してはならない（docs/release.md）。
       - name: 成果物を取り出す
         uses: actions/upload-artifact@v4
         with:
           name: katachi-unsigned-${{ matrix.label }}
-          path: build/release/package
+          path: |
+            build/release/Katachi-*.dmg
+            build/release/Katachi-*.zip
+            build/release/Katachi-*-setup.exe
           if-no-files-found: error
 
   sanitizers:
