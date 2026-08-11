@@ -53,6 +53,13 @@ set_tests_properties(package.build PROPERTIES FIXTURES_REQUIRED katachi_installe
 
 set(KATACHI_PACKAGE_CHECKS P1 P2 P3 P4 P5 P6 P7 P8)
 
+# P2 / P3 は macOS 固有（universal / minos）。Windows では検査自体が
+# 対象外として素通りするため、違反フィクスチャも作らない。
+set(KATACHI_PACKAGE_VIOLATIONS ${KATACHI_PACKAGE_CHECKS})
+if(NOT APPLE)
+    list(REMOVE_ITEM KATACHI_PACKAGE_VIOLATIONS P2 P3)
+endif()
+
 foreach(check IN LISTS KATACHI_PACKAGE_CHECKS)
     string(TOLOWER "${check}" lower)
     add_test(NAME package.${lower}
@@ -63,4 +70,21 @@ foreach(check IN LISTS KATACHI_PACKAGE_CHECKS)
                      -DKATACHI_EXPECTED_VERSION=${PROJECT_VERSION}
                      -P "${KATACHI_PACKAGE_SCAN}")
     set_tests_properties(package.${lower} PROPERTIES FIXTURES_REQUIRED katachi_packaged)
+endforeach()
+
+# 故意に壊した配布物を検査させ、確実に落ちることを確かめる。
+# **これが無いと、検査が空振りしていても「全部 green」に見える。**
+foreach(check IN LISTS KATACHI_PACKAGE_VIOLATIONS)
+    string(TOLOWER "${check}" lower)
+    add_test(NAME package.${lower}.detects_violation
+             COMMAND "${CMAKE_COMMAND}"
+                     -DKATACHI_CHECK=${check}
+                     -DKATACHI_PACKAGE_ROOT=${KATACHI_PACKAGE_STAGE}
+                     -DKATACHI_WORK_DIR=${CMAKE_BINARY_DIR}/package-violations
+                     -DKATACHI_SCAN=${KATACHI_PACKAGE_SCAN}
+                     -DKATACHI_QT_PREFIX=${KATACHI_QT_PREFIX}
+                     -DKATACHI_EXPECTED_VERSION=${PROJECT_VERSION}
+                     -P "${PROJECT_SOURCE_DIR}/tests/packaging/violate_package.cmake")
+    set_tests_properties(package.${lower}.detects_violation
+                         PROPERTIES FIXTURES_REQUIRED katachi_packaged)
 endforeach()

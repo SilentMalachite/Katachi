@@ -78,88 +78,6 @@ jobs:
       - name: ビルド（警告ゼロ / -Werror・MSVC は /WX）
         run: cmake --build --preset dev
 
-      # ────────────────────────────────────────────────────────────────
-      # Phase 4 T1: 配布の前提を実測する。**一時的な手順である。**
-      #
-      # docs/progress/phase4.md の「推測で埋めた箇所」1〜4 を実測に置き換えるために
-      # 置く。T7 で恒久の package ジョブを作るときに、この 2 ステップは削除する。
-      #
-      # 落ちても後続を止めない（continue-on-error）。これは計測であって検査ではなく、
-      # ここで CI を赤くしても得るものが無い。**結果は必ず progress に記録する。**
-      # ────────────────────────────────────────────────────────────────
-      - name: T1 配布の前提を実測 (macOS)
-        if: runner.os == 'macOS'
-        continue-on-error: true
-        run: |
-          echo "── (1) Qt のアーキテクチャ ── universal binary が組めるかを決める"
-          lipo -archs "$QT_ROOT_DIR/lib/QtCore.framework/QtCore"
-          echo
-          echo "── (2) macdeployqt の署名・公証オプション ──"
-          # 引数なしだと使い方を表示して exit 1 を返すため、パイプの前で握りつぶす。
-          { "$QT_ROOT_DIR/bin/macdeployqt" 2>&1 || true; } \
-            | grep -E 'codesign|hardened-runtime|timestamp|notarization|-dmg' \
-            || echo "(該当するオプションが無い)"
-          echo
-          echo "── (5) 成果物の形 ── T2 で MACOSX_BUNDLE を明示した結果を確認する"
-          ls -d build/dev/src/app/Katachi.app
-          find build/dev/src/app/Katachi.app -type f
-          echo
-          echo "── 配布対象の下限（T2 で 13.0 を指定した）──"
-          otool -l build/dev/src/app/Katachi.app/Contents/MacOS/Katachi \
-            | grep -A4 LC_BUILD_VERSION | grep -E 'minos|sdk'
-          echo
-          echo "── (6) release プリセット: universal と据え付け（T3）──"
-          cmake --preset release > /dev/null
-          cmake --build --preset release > /dev/null
-          cmake --install build/release --prefix build/release/stage > /dev/null
-          echo "アーキテクチャ:"
-          lipo -archs build/release/stage/Katachi.app/Contents/MacOS/Katachi
-          echo "据え付けた木:"
-          find build/release/stage | sed 's|build/release/stage|<prefix>|'
-        shell: bash
-
-      - name: T1 配布の前提を実測 (Windows)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        run: |
-          echo "── (4) PE のサブシステム ── T2 で WIN32_EXECUTABLE を明示した結果"
-          dumpbin -headers build/dev/src/app/Katachi.exe | grep -i subsystem || true
-          echo
-          echo "── バージョン資源が埋まっているか（T2 の .rc）──"
-          dumpbin -headers build/dev/src/app/Katachi.exe | grep -i "resource" || true
-          echo
-          echo "── (3) windeployqt が何を配置するか ──"
-          mkdir -p stage && cp build/dev/src/app/Katachi.exe stage/
-          "$QT_ROOT_DIR/bin/windeployqt.exe" stage/Katachi.exe
-          echo "-- 配置されたファイル --"
-          find stage -type f | sort
-          echo "-- 合計 --"
-          find stage -type f | wc -l | xargs echo "ファイル数:"
-          du -sh stage | awk '{print "大きさ:", $1}'
-          echo
-          echo "── (6) release プリセットの据え付け（T3）──"
-          # **ローカルは macOS しかないため、Windows の据え付けはここが唯一の検証である。**
-          cmake --preset release > /dev/null
-          cmake --build --preset release > /dev/null
-          cmake --install build/release --prefix build/release/stage > /dev/null
-          echo "据え付けた木:"
-          find build/release/stage | sed 's|build/release/stage|<prefix>|'
-          echo
-          echo "── (7) Windows の配布物を組み立てる（T6）──"
-          cmake -DKATACHI_STAGE_DIR="$PWD/build/release/stage" \
-                -DKATACHI_SOURCE_DIR="$PWD" \
-                -DKATACHI_QT_PREFIX="$QT_ROOT_DIR" \
-                -DKATACHI_APP_VERSION=0.1.0 \
-                -DKATACHI_QT_VERSION="$QT_VERSION" \
-                -DKATACHI_OUTPUT_ZIP="$PWD/build/release/Katachi-0.1.0-windows-x64.zip" \
-                -P cmake/PackageWindows.cmake
-          echo "-- 配置された内容 --"
-          find build/release/stage -type f | sed 's|build/release/stage|<pkg>|' | sort
-          find build/release/stage -type f | wc -l | xargs echo "ファイル数:"
-          du -sh build/release/stage | awk '{print "大きさ:", $1}'
-          ls -l build/release/*.zip | awk '{print "zip:", $5, $9}'
-        shell: bash
-
       # docs/format-matrix.md はビルド時に生成され、内容は実行環境の Qt プラグイン構成で
       # 決まる（cmake/FormatMatrix.cmake）。OS ごとに何が使えるのかを推測で書かないため、
       # 両 OS の生成物をここで取り出す（Phase 3 T1）。
@@ -261,6 +179,59 @@ jobs:
         run: ctest --preset dev-codecs --output-on-failure
         env:
           QT_QPA_PLATFORM: offscreen
+
+  package:
+    name: 配布物 (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS
+            os: macos-14
+            qt_arch: clang_64
+          - label: Windows
+            os: windows-2022
+            qt_arch: win64_msvc2022_64
+
+    # release プリセット（macOS は universal / KATACHI_PACKAGE=ON）を毎 PR で通す。
+    # **「リリース時だけ通る構成」を作らないため**（ADR-0015 論点 3）。
+    # 署名と公証はローカルでのみ行う（同 論点 4）。ここは未署名の成果物までを作る。
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: MSVC 開発環境を設定
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Ninja を導入
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install ninja; else choco install ninja -y --no-progress; fi
+        shell: bash
+
+      - name: Qt ${{ env.QT_VERSION }} を導入
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: ${{ matrix.qt_arch }}
+          modules: qtimageformats
+          cache: true
+
+      - name: 構成とビルド
+        run: |
+          cmake --preset release
+          cmake --build --preset release
+
+      # package.* は組み立てから検査まで（違反フィクスチャを含む）を行う。
+      - name: 配布物の組み立てと機械検査
+        run: ctest --preset release -R "^package\\." --output-on-failure
+
+      - name: 成果物を取り出す
+        uses: actions/upload-artifact@v4
+        with:
+          name: katachi-unsigned-${{ matrix.label }}
+          path: build/release/package
+          if-no-files-found: error
 
   sanitizers:
     name: ASan + UBSan (macOS)
