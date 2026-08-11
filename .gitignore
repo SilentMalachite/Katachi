@@ -15,3 +15,4 @@ docs/format-matrix.md
 .idea/
 *.user
 compile_commands.json
+p8-stderr.txt

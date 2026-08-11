@@ -251,7 +251,10 @@ elseif(KATACHI_CHECK STREQUAL "P7")
 #
 # **これは真のクリーン環境の代替であり、置き換えではない**（T8 で実機確認する）。
 elseif(KATACHI_CHECK STREQUAL "P8")
-    set(log "${CMAKE_CURRENT_BINARY_DIR}/p8-stderr.txt")
+    # `cmake -P` では CMAKE_CURRENT_BINARY_DIR が作業ディレクトリを指す。
+    # そこへ書くとリポジトリ直下にゴミが出るため、配布物の隣に置く。
+    get_filename_component(log_dir "${root}" DIRECTORY)
+    set(log "${log_dir}/p8-stderr.txt")
     if(platform STREQUAL "macos")
         set(launcher env -i "HOME=$ENV{HOME}" "PATH=/usr/bin:/bin" "${exe}")
     else()
