@@ -1272,3 +1272,84 @@ T7c（P9）**93 行** / 修正 2 件。**着手時に分割を申告し、3 コ�
 2. **T8: 実機確認。** 日本語入力（推測 8）/ Windows 実機 / クリーン環境起動 /
    インストーラの生成と動作（推測 12）
 3. T9: 受け入れ基準の検証・文書更新・PR
+
+---
+
+## 2026-08-11 — T9: 受け入れ基準を検証した。**5 件中 3 件が達成。2 件は未達**
+
+### 実施内容
+
+`docs/phases.md` §4 Phase 4 の 5 項目を検証し、根拠の表を添えた。
+`README.md` と `docs/licenses.md` を実態に合わせ、**ADR-0016 を書いた**。
+
+### 検証の結果（**達成していないものを達成と書かない**）
+
+| 基準 | 状態 | 根拠 |
+|---|---|---|
+| 1 macOS: universal / macdeployqt / **署名・公証済み** `.dmg` | **未達** | universal・`macdeployqt`・**Developer ID 署名までは達成**。22 件すべてに hardened runtime + secure timestamp、`codesign --verify --deep --strict` が exit 0。**公証を実施していない**（資格情報が未取得）。`spctl` は `Unnotarized Developer ID` を返す |
+| 2 Windows: windeployqt / zip / インストーラ | **達成** | CI run 31455251987 の artifact に `Katachi-0.1.0-windows-x64.zip`（18 MB）と **`Katachi-0.1.0-setup.exe`（14 MB）**が実在する |
+| 3 `third_party_licenses.txt` の同梱 | **達成** | 両 OS の配布物に実在。**P5・P6 が機械検査**する |
+| 4 動的リンクの確認 | **達成** | **P1** が両 OS で機械検査。違反フィクスチャ付き |
+| 5 クリーンな環境での起動確認 | **未達** | 機械的な代替（P8 / P9）は CI で走るが、**真のクリーン環境での実機起動を確認していない** |
+
+**未達 2 件は、いずれも利用者の環境と資格情報を要する項目である。**
+
+### 推測 12 の解消
+
+**インストーラを実際に生成した。** CI の Windows に Inno Setup を入れ、
+`package.build` に成果物そのもの（`.dmg` / zip / インストーラ）まで作らせた。
+
+**組み立てだけ確かめて配布形式を作らないと、そこが未検証のまま残る。**
+artifact も「組み立て後のディレクトリ」から「配布物そのもの」に変えた。
+
+### 実測で気づいた運用上の落とし穴（**直した**）
+
+**`ctest --preset release` を走らせると、署名済みの成果物が未署名で上書きされる。**
+`package.build` が署名なしで組み立てるためである（CI で署名しない設計上、正しい動作）。
+
+**実際に一度そうなっていた。** 公証の事前確認をしたとき、`build/release/stage/Katachi.app`
+が ad-hoc 署名に戻っていた。配布用の置き場を `build/release/dist` に分け、
+`docs/release.md` に理由とともに書いた。
+
+併せて、**公証の事前条件を提出前に確かめる手順**を `docs/release.md` §4 に足した
+（全バイナリの Developer ID / hardened runtime / timestamp、`get-task-allow` の不在）。
+**落ちてから理由を読むより速い。**
+
+### ADR-0016 を書いていなかった（**申告**）
+
+D8〜D13 の記録先として何度も参照していたのに、**ファイルを作っていなかった。**
+`README.md` の文書表を更新したときに気づいた。T9 で作成した。
+
+**参照先の実在をまとめて機械的に確かめ**（`README.md` と `docs/` 配下の
+`docs/...` へのリンク）、壊れたリンクが無いことを確認した。
+
+### 変更ファイル
+
+- 追加: `docs/adr/0016-distribution-licenses.md`
+- 変更: `docs/phases.md`（§4 Phase 4 のチェックボックスと根拠の表）、
+  `README.md`（状態・未確認項目・配布物の節・文書表・機械検査の表）、
+  `cmake/PackageChecks.cmake`、`.github/workflows/ci.yml`、`docs/release.md`
+
+### 品質ゲートの実行結果
+
+| 構成 | 結果 |
+|---|---|
+| `dev` | **172 / 172** / clang-format 指摘なし / clang-tidy **指摘 0** |
+| `asan` | **172 / 172** |
+| `release` | **192 / 192** |
+| CI run 31455251987 | **7 ジョブすべて success** |
+
+### 推測で埋めた箇所
+
+| # | 内容 | 状態 |
+|---|---|---|
+| 8 | 仮想キーボードを外して macOS の日本語入力に影響が無いか | **未確認。T8 でお願いする** |
+| 11 | `opengl32sw.dll` を残す判断の根拠 | **未確認。** GPU の無い Windows で確かめていない |
+| 12 | Inno Setup のインストーラを生成していない | **解消。** 14 MB の `setup.exe` が CI で生成された |
+
+### 残課題 / 次にやること
+
+1. **公証**（資格情報待ち）。`docs/release.md` §3
+2. **T8: 実機確認。** 日本語入力 / Windows 実機（zip とインストーラ）/
+   クリーン環境での起動 / GPU の無い環境（推測 11）
+3. PR の作成。**受け入れ基準 2 件が未達のままなので、その扱いを利用者に確認する**

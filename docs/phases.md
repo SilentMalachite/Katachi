@@ -202,10 +202,26 @@ CLAUDE.md の「絶対禁止」を機械化したもの。人手のレビュー�
 
 ### Phase 4
 - [ ] macOS: universal binary、`macdeployqt` 済み、署名・公証済み `.dmg`
-- [ ] Windows: `windeployqt` 済み、ポータブル zip + インストーラ
-- [ ] 成果物に `third_party_licenses.txt` が同梱されている
-- [ ] Qt を動的リンクしていることを `otool -L` / `dumpbin /dependents` で確認済み
+- [x] Windows: `windeployqt` 済み、ポータブル zip + インストーラ
+- [x] 成果物に `third_party_licenses.txt` が同梱されている
+- [x] Qt を動的リンクしていることを `otool -L` / `dumpbin /dependents` で確認済み
 - [ ] クリーンな環境（Qt 未インストール）で起動を確認済み
+
+**根拠**（2026-08-11、`phase4` ブランチ。詳細は `docs/progress/phase4.md`）
+
+| 基準 | 状態 | 根拠 |
+|---|---|---|
+| 1 | **未達** | universal・`macdeployqt`・**Developer ID 署名までは達成**（`lipo -archs` が `x86_64 arm64`、`codesign --verify --deep --strict` が exit 0、22 件すべてに hardened runtime + secure timestamp）。**公証を実施していない。** 資格情報が未取得のため。`spctl` は `Unnotarized Developer ID` を返す — 公証前の正しい状態である |
+| 2 | **達成** | CI run 31455251987 の artifact に `Katachi-0.1.0-windows-x64.zip`（18 MB）と `Katachi-0.1.0-setup.exe`（14 MB）が実在する。`windeployqt` の出力は 68 ファイル / 122 MB（Debug・素）から **22 ファイル / 45 MB**（Release・削った後）になった |
+| 3 | **達成** | macOS は `Contents/Resources/` と `.dmg` 直下、Windows は配布物直下に `third_party_licenses.txt`（1,489 行 / 128 KB / 第三者 43〜44 件 / 法文 22 種）。**機械検査 P5・P6 が両 OS で検証**し、法文が 1 つでも欠ければ生成時に `FATAL_ERROR` で止まる |
+| 4 | **達成** | **機械検査 P1** が両 OS で検証する。macOS は `otool -L` に `@rpath/Qt*.framework` が 4 件、Windows は `dumpbin -dependents` に `Qt6{Core,Gui,Widgets,Concurrent}.dll`。違反フィクスチャで空振りしないことも確認済み |
+| 5 | **未達** | **機械的な代替**は用意した（macOS は P8 が Qt の環境変数を除いた環境で起動、Windows は P9 が依存解決を検査）。**しかし真のクリーン環境での実機起動を確認していない。** `CLAUDE.md` のとおり、CI の成功や自動テストの結果を実機起動の根拠にしない |
+
+**未達 2 件は、いずれも利用者の環境と資格情報を要する項目である。**
+公証は App Store Connect の資格情報が要り、実機確認は Qt を持たない macOS の
+ユーザーアカウントと Windows の実機が要る。手順は `docs/release.md` §3 と §5。
+
+**Phase 0〜2 のチェックボックスは未更新のままである**（Phase 3 と同じ扱い）。
 
 ---
 

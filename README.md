@@ -12,7 +12,7 @@
 
 ## 状態
 
-**Phase 3（拡張コーデック）まで完了。** 手元で実用できる段階にある。
+**Phase 4（配布）を実施中。** 配布物は作れる段階にあるが、**公証と実機確認が残っている。**
 
 | Phase | 内容 | 状態 |
 |---|---|---|
@@ -20,7 +20,7 @@
 | 1 | コア：`Result` / 能力表 / `convert()` / 命名規則 | 完了 |
 | 2 | GUI：D&D / ジョブ一覧 / 設定パネル / 進捗 / キャンセル / 結果表示 | **完了（下記 2 点を除く）** |
 | 3 | 拡張コーデック：AVIF / JPEG XL / PSD / RAW（オプショナル依存） | **完了（macOS のみ。下記参照）** |
-| 4 | 配布：`macdeployqt` / `windeployqt` / 署名・公証 / インストーラ | 未着手 |
+| 4 | 配布：`macdeployqt` / `windeployqt` / 署名・公証 / インストーラ | **実施中（受け入れ基準 5 件中 3 件が達成）** |
 
 ### 未確認・未対応の項目（正直に記載する）
 
@@ -30,6 +30,13 @@
 - **Windows での追加コーデック** — 未対応。`KATACHI_EXTRA_CODECS=ON` の CI ジョブは macOS のみ
 - **追加コーデック ON でのアプリ実機起動** — 未確認。ビルドとテストが通ることのみ確認済み
 - **HEIF** — 自前導入は対象外。macOS は `qmacheif`（Qt 同梱）で読み書き可、Windows は使えないまま
+- **macOS の公証** — **未実施。** Developer ID での署名までは済んでいるが、公証していないため
+  Gatekeeper は `Unnotarized Developer ID` を返す
+- **クリーンな環境での起動** — **未確認。** 機械的な代替（Qt の環境変数を除いた起動、
+  依存解決の検査）は CI で走っているが、**Qt を持たない実機での起動は確かめていない**
+- **仮想キーボードを外した影響** — 配布物から `platforminputcontexts` を削っている。
+  macOS の日本語入力は `cocoa` プラグインが担うため影響しないと考えているが、
+  **実機で日本語を打って確かめていない**
 
 **CI の成功や自動テストの結果を実機操作の根拠にはしない。**
 
@@ -148,6 +155,7 @@ cmake --preset asan && ctest --preset asan
 |---|---|
 | INV1〜INV7 | 依存方向 / フォーマット名の文字列リテラル / core のファイルアクセス / 警告抑制 / ワーカースレッドからの `QWidget` 参照 など |
 | ui1〜ui3 | アニメーション / 独自テーマ / 複数ウィンドウの禁止 |
+| P1〜P9 | 配布物の検査：動的リンク / universal / 対象 OS の下限 / 画像プラグインの一致 / 権利表示 / 版 / 起動 / 依存解決（`release` プリセットでのみ走る） |
 
 **すべて違反フィクスチャ付き**で、検査が空振りしていないことを機械で確かめている。
 
@@ -179,7 +187,8 @@ cmake --preset asan && ctest --preset asan
 | [`docs/phases.md`](docs/phases.md) | Phase 分割・受け入れ基準・品質ゲート |
 | [`docs/agent-protocol.md`](docs/agent-protocol.md) | 報告書式・サブエージェント・曖昧さの解決順序 |
 | [`docs/licenses.md`](docs/licenses.md) | 本体と依存物のライセンス条件 |
-| [`docs/adr/`](docs/adr/) | 設計判断の記録（ADR-0001〜0014） |
+| [`docs/release.md`](docs/release.md) | 配布物の作り方・署名・公証・検証の手順 |
+| [`docs/adr/`](docs/adr/) | 設計判断の記録（ADR-0001〜0016） |
 | [`docs/progress/`](docs/progress/) | Phase ごとの実施記録（**追記のみ**） |
 
 ---
@@ -219,7 +228,48 @@ Catch2 v3（Boost Software License 1.0）は**テストのみで使い、成果�
 Qt 同梱の画像フォーマットプラグインは libjpeg-turbo / libtiff / libwebp などを内部に含む。
 追加コーデック（ON 時）は libavif / libjxl / LibRaw / kimageformats / ECM を使う。
 いずれも GPLv3 と両立することを確認済み（[`docs/licenses.md`](docs/licenses.md) §5.1）。
-配布時の第三者ライセンス文の同梱は Phase 4 で扱う（同 §4）。
+配布時に同梱する第三者ライセンス文は Qt の SBOM から機械的に生成する（同 §4）。
+
+---
+
+## 配布物
+
+**まだリリースしていません。** 作り方と検証の手順は [`docs/release.md`](docs/release.md)。
+
+| OS | 形式 | 状態 |
+|---|---|---|
+| macOS 13 以上 | `.dmg`（universal: x86_64 + arm64） | **Developer ID 署名済み・未公証** |
+| Windows 10 以上 (x64) | ポータブル zip / インストーラ | **未署名**（SmartScreen の警告が出ます） |
+
+### 同梱するもの・しないもの
+
+配布物には**アプリが実際に使う Qt のライブラリとプラグインだけ**を入れています。
+`macdeployqt` / `windeployqt` の素の出力から、**使わないものを削って**います。
+
+- **削るもの**: 仮想キーボードのプラグインと、それが引き込む `QtQuick` / `QtQml` /
+  `QtNetwork` など 9 つ。**このアプリは Qt Quick を使わず**（[ADR-0001](docs/adr/0001-ui-toolkit.md)）、
+  **ネットワーク通信も行いません。** 配布物の中身を、その決定と食い違わせないためです
+- **戻すもの**: `macdeployqt` は SVG の画像プラグインを落とすため、明示的に戻しています。
+  放置すると**配布物だけ SVG が読めなくなります**
+- **入れないもの（Windows）**: MSVC のランタイム DLL。**個別の再頒布が許諾されていない**ため
+  （Qt 公式ドキュメントの記載）。ポータブル zip は
+  [Microsoft Visual C++ 再頒布可能パッケージ (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+  を必要とします。インストーラ版は公式の再頒布パッケージを実行します
+
+### 対応形式は OS で異なります
+
+macOS は 21 形式、Windows は 18 形式です。差は `heic` / `heif` / `jp2` の 3 つで、
+これらは macOS 固有の Qt プラグイン（Apple の Image I/O を使うもの）によるためです。
+
+### 第三者コードの権利表示
+
+成果物には `LICENSE`（本体の GPLv3）と `third_party_licenses.txt` を同梱します。
+後者は **Qt が同梱する SPDX 2.3 の SBOM から機械的に生成**しており、
+**法文が 1 つでも欠けていればビルドが止まります**。
+
+**ただし、この一覧が完全であることは機械では確かめられません。** `QtCore` に静的に
+取り込まれた第三者コードは配布物にファイルとして現れないためです。詳細は
+[`docs/licenses.md`](docs/licenses.md) §4.3。
 
 ---
 
