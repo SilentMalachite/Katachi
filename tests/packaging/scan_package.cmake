@@ -336,10 +336,25 @@ elseif(KATACHI_CHECK STREQUAL "P9")
             string(REGEX MATCHALL "[A-Za-z0-9_.+-]+\\.dll" refs "${deps}")
             get_filename_component(binary_dir "${binary}" DIRECTORY)
             foreach(ref IN LISTS refs)
-                # System32 にあるものはシステム DLL。それ以外は配布物に要る。
+                string(TOLOWER "${ref}" lower_ref)
+                # (a) API セット。**System32 に実ファイルとして存在しない。**
+                #     Windows が API セットスキーマで解決する仮想 DLL であり、
+                #     ファイルの有無で判定してはならない（CI run 31447067573 で実測）。
+                if(lower_ref MATCHES "^(api|ext)-ms-win-")
+                    continue()
+                endif()
+                # (b) MSVC ランタイム。**意図して同梱していない**（ADR-0016 D13。
+                #     個々の DLL は再頒布が許諾されていない）。利用者が公式の
+                #     再頒布可能パッケージを入れることが前提であり、
+                #     同梱物の欠落ではない。README.txt に必要と明記してある。
+                if(lower_ref MATCHES "^(vcruntime|msvcp|concrt|vccorlib)")
+                    continue()
+                endif()
+                # (c) System32 にあるものはシステム DLL。
                 if(EXISTS "${system_dir}/${ref}")
                     continue()
                 endif()
+                # (d) 残りは配布物の中に無ければならない。
                 if(EXISTS "${root}/${ref}" OR EXISTS "${binary_dir}/${ref}")
                     continue()
                 endif()
