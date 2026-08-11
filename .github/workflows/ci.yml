@@ -223,8 +223,14 @@ jobs:
           cmake --build --preset release
 
       # package.* は組み立てから検査まで（違反フィクスチャを含む）を行う。
+      #
+      # **正規表現に \ を使わない。** Windows の既定シェルは pwsh で、
+      # bash と違い "\\." がそのまま ctest へ渡り 1 件も一致しなかった
+      # （実測。ctest は「テストが 0 件」で非ゼロ終了するため気づけた）。
+      # shell: bash も明示して、両 OS で同じ解釈にする。
       - name: 配布物の組み立てと機械検査
-        run: ctest --preset release -R "^package\\." --output-on-failure
+        run: ctest --preset release -R "^package" --output-on-failure
+        shell: bash
 
       - name: 成果物を取り出す
         uses: actions/upload-artifact@v4
