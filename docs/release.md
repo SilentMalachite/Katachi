@@ -1,10 +1,14 @@
 # リリース手順
 
-配布物を作り、署名し、公証し、検証するまでの手順。
+配布物を作り、署名し、（任意で）公証し、検証するまでの手順。
 
-**署名と公証はローカルでのみ行う**（ADR-0015 論点 4）。証明書と公証の資格情報を
-GitHub に置かない。**CI は未署名の成果物までを作る。CI の成功を、署名済み成果物が
-正しいことの根拠として報告しない。**
+**署名はローカルでのみ行う**（ADR-0015 論点 4）。証明書を GitHub に置かない。
+**CI は未署名の成果物までを作る。CI の成功を、署名済み成果物が正しいことの根拠として
+報告しない。**
+
+**公証は任意である**（2026-08-17 の決定。ADR-0015 追記）。受け入れ基準 1 は
+Developer ID 署名までを必須とし、公証は行わなくてよい。公証なしで配るときの受け手向け
+手順は §3.0。公証を行う場合の手順は §3.1 以降に残す。
 
 Phase 4 の受け入れ基準は `docs/phases.md` §4。実施の記録は `docs/progress/phase4.md`。
 
@@ -12,12 +16,12 @@ Phase 4 の受け入れ基準は `docs/phases.md` §4。実施の記録は `docs
 
 ## 0. 用意するもの
 
-| 項目 | 確認のしかた |
-|---|---|
-| Developer ID Application 証明書 | `security find-identity -v -p codesigning` |
-| `notarytool`（Xcode 同梱） | `xcrun --find notarytool` |
-| 公証の資格情報 | 下記 §3.1 でキーチェーンに保存する |
-| Qt 6.8 以上 | `qmake6 -query QT_INSTALL_PREFIX` |
+| 項目 | 必須か | 確認のしかた |
+|---|---|---|
+| Developer ID Application 証明書 | **必須**（macOS 配布） | `security find-identity -v -p codesigning` |
+| Qt 6.8 以上 | **必須** | `qmake6 -query QT_INSTALL_PREFIX` |
+| `notarytool`（Xcode 同梱） | 公証する場合のみ | `xcrun --find notarytool` |
+| 公証の資格情報 | 公証する場合のみ | 下記 §3.1 でキーチェーンに保存する |
 
 ---
 
@@ -84,7 +88,45 @@ codesign --force --options runtime --timestamp \
 
 ## 3. 公証
 
-### 3.1 資格情報をキーチェーンに保存する（初回のみ）
+**公証は任意である。** 受け入れ基準 1 は Developer ID 署名までで足りる。
+公証しない場合は §3.0 だけを行い、§3.1 以降は飛ばす。
+
+### 3.0 公証なしで配る場合（**既定の経路**）
+
+Developer ID で署名しただけの `.dmg` / `.app` は、Gatekeeper が次のように判定する
+（**実測済み**。`docs/progress/phase4.md`）。
+
+```text
+spctl --assess ... → Unnotarized Developer ID
+```
+
+これは署名失敗ではなく、**未公証の Developer ID 配布として正しい状態**である。
+受け手がダウンロードしたアプリを開くとき、macOS は警告を出すことがある。
+
+#### 受け手に伝えること（README にも同趣旨を書く）
+
+1. **Finder で右クリック →「開く」**を選ぶ（ダブルクリックだけでは拒否されることがある）
+2. ダイアログで再度「開く」を選ぶ
+3. それでも開かない場合は、隔離属性を外す（ターミナル）:
+
+```bash
+xattr -d com.apple.quarantine /Applications/Katachi.app
+# または .dmg からコピーした直後のパス
+```
+
+4. `codesign --verify --deep --strict` が通っていることだけは、配布者が事前に確かめる
+   （§4 の必須検証）。`stapler validate` と公証済みの `spctl` 合格は求めない
+
+#### 配布者がやってはいけないこと
+
+- 未公証であることを隠す
+- `spctl` の `Unnotarized Developer ID` を「失敗」として受け入れ基準に落とす
+- 受け手に「公証済みと同じ安全性」と説明する
+
+公証を後から足す場合は、同じ `.dmg` に対して §3.1 以降を実行すればよい
+（署名のやり直しは不要。ただし再パッケージしたら再署名が要る）。
+
+### 3.1 資格情報をキーチェーンに保存する（公証する場合・初回のみ）
 
 App Store Connect の API キーを使う方法（**推奨**。Apple ID と違い 2 要素認証の影響を受けない）。
 
@@ -102,7 +144,7 @@ xcrun notarytool store-credentials katachi-notary \
   --apple-id you@example.com --team-id TEAMID --password アプリ用パスワード
 ```
 
-### 3.2 提出して待つ
+### 3.2 提出して待つ（公証する場合）
 
 ```bash
 xcrun notarytool submit build/release/Katachi-0.1.0.dmg \
@@ -115,38 +157,31 @@ xcrun notarytool submit build/release/Katachi-0.1.0.dmg \
 xcrun notarytool log <submission-id> --keychain-profile katachi-notary
 ```
 
-### 3.3 staple する
+### 3.3 staple する（公証する場合）
 
 ```bash
 xcrun stapler staple build/release/Katachi-0.1.0.dmg
 ```
 
-**staple しないと、ネットワークが無い環境で Gatekeeper が判断できない。**
+**staple しないと、ネットワークが無い環境で Gatekeeper が公証の有無を判断できない。**
 
 ---
 
 ## 4. 検証（**結果を `docs/progress/phase4.md` に貼る**）
 
+### 4.1 必須（受け入れ基準 1・4）
+
 ```bash
-# 公証の事前条件（**提出前にこれを確かめる。落ちてから理由を読むより速い**）
-#   Developer ID / flags=0x10000(runtime) / Timestamp= の 3 つが全バイナリに要る
+# Developer ID / flags=0x10000(runtime) / Timestamp= の 3 つが全バイナリに要る
 for f in build/release/dist/Katachi.app/Contents/Frameworks/*.framework \
          build/release/dist/Katachi.app/Contents/PlugIns/*/*.dylib \
          build/release/dist/Katachi.app/Contents/MacOS/Katachi \
          build/release/dist/Katachi.app; do
   codesign -dv --verbose=2 "$f" 2>&1 | grep -qE "flags=0x10000\(runtime\)" || echo "NG: $f"
 done
-# get-task-allow が付いていると公証は拒否される（0 件であること）
-codesign -d --entitlements - build/release/dist/Katachi.app 2>&1 | grep -c get-task-allow
 
 # 署名が正しいか
 codesign --verify --deep --strict --verbose=2 build/release/dist/Katachi.app
-
-# Gatekeeper が受け入れるか
-spctl --assess --type execute --verbose=2 build/release/dist/Katachi.app
-
-# staple が効いているか
-xcrun stapler validate build/release/Katachi-0.1.0.dmg
 
 # Qt が動的リンクか（受け入れ基準 4）
 otool -L build/release/dist/Katachi.app/Contents/MacOS/Katachi | grep '@rpath/Qt'
@@ -155,15 +190,35 @@ otool -L build/release/dist/Katachi.app/Contents/MacOS/Katachi | grep '@rpath/Qt
 lipo -archs build/release/dist/Katachi.app/Contents/MacOS/Katachi
 ```
 
+公証していない場合、次は **失敗してよい**（むしろ未公証の正しい表示）。
+
+```bash
+spctl --assess --type execute --verbose=2 build/release/dist/Katachi.app
+# 期待: Unnotarized Developer ID
+```
+
+### 4.2 公証した場合のみ
+
+```bash
+# 公証の事前条件（提出前に確かめる）
+codesign -d --entitlements - build/release/dist/Katachi.app 2>&1 | grep -c get-task-allow
+# get-task-allow が付いていると公証は拒否される（0 件であること）
+
+spctl --assess --type execute --verbose=2 build/release/dist/Katachi.app
+xcrun stapler validate build/release/Katachi-0.1.0.dmg
+```
+
 **実行していない検証を「通った」と書かない。**
 
 ---
 
 ## 5. クリーンな環境での起動確認（受け入れ基準 5）
 
-**CI の成功や自動テストの結果を、実機起動の根拠にしない。**
+### 5.1 macOS（**実機が必須**）
 
-macOS は **Qt を持たない別のユーザーアカウント**で確かめる。Qt が `$HOME` 配下にしか
+**macOS については、CI の成功や自動テストの結果を実機起動の根拠にしない。**
+
+**Qt を持たない別のユーザーアカウント**で確かめる。Qt が `$HOME` 配下にしか
 無いことを先に確認する（Homebrew 版 Qt の有無も見る）。
 
 ```bash
@@ -174,11 +229,48 @@ brew list 2>/dev/null | grep -i '^qt'   # Homebrew 版
 確認する項目。
 
 - `.dmg` を開いて Applications へ引き込み、起動する
+  （未公証なら §3.0 の「右クリック → 開く」経路も確認する）
 - **日本語入力ができる**（`platforminputcontexts` を削っているため。仮想キーボードは
   外したが macOS の IME は `cocoa` プラグインが担う、というのが削った根拠であり、
   **実機で確かめるまで確証はない**）
 - 画像を D&D して変換できる
 - 対応形式の一覧に svg / svgz がある（`libqsvg` を戻した効果）
+
+確認結果は `docs/progress/phase4.md` の「T8 実機確認（記入用）」へ**追記のみ**で残す。
+結果を書いたあと、§5.3 のクローズ手順を実行する。
+
+### 5.2 Windows（**CI の機械検査で足りる**）
+
+Windows 実機は必須としない（2026-08-17 の決定）。受け入れ基準 5 の Windows 側は、
+`release` プリセットの **P9（依存解決）** と `package` ジョブの成功をもって達成とする。
+
+実機が手元に無いことの帰結として、次は **未確認のまま残す**（「通った」と書かない）。
+
+- GPU ドライバの無い環境での `opengl32sw.dll` の要否
+- SmartScreen を実際にクリックして進めた経験
+- インストーラ / ポータブル zip の人手による起動感
+
+手順の詳細は `docs/progress/phase4.md` の T6・T7 の記録を参照。
+
+### 5.3 Phase 4 クローズ手順（**§5.1 が全部 OK になったあと**）
+
+**この節を読むだけではクローズしない。** §5.1 の実機結果を `phase4.md` に書いたあと、
+次をこの順で行う。どれか 1 つでも未記入なら止め、基準 5 を `[x]` にしない。
+
+1. `docs/progress/phase4.md` の「T8 実機確認（記入用）」をすべて埋める  
+   （日付・OS 版・アカウントが Qt 無しであること・チェック項目の可否）
+2. 同ファイル末尾に「Phase 4 クローズ」節を**追記**する（既存文は消さない）
+3. `docs/phases.md` §4 Phase 4 の基準 5 を `- [x]` にし、根拠表の行 5 を「達成」と実機根拠に直す
+4. `README.md` の「状態」を Phase 4 完了に直し、未確認一覧から **macOS クリーン環境**と
+   **仮想キーボード / 日本語入力**のうち実機で確認したものを外す（確認していない項目は残す）
+5. コミットメッセージ例: `docs: Phase 4 をクローズする（macOS 実機確認済み）`
+
+**クローズしても「未確認のまま残してよい」もの**（必須ではない）:
+
+- 公証（任意。§3.1 以降）
+- Windows 実機 / GPU 無し環境 / SmartScreen の人手操作
+- キーボードのみでの開始・キャンセル（Phase 2 からの継続）
+- Windows での追加コーデック
 
 ---
 

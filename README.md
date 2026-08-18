@@ -12,7 +12,8 @@
 
 ## 状態
 
-**Phase 4（配布）を実施中。** 配布物は作れる段階にあるが、**公証と実機確認が残っている。**
+**Phase 4（配布）を実施中。** 配布物は作れる。**公証は任意**（必須ではない）。
+残る必須は **macOS のクリーン環境での実機起動確認**である。
 
 | Phase | 内容 | 状態 |
 |---|---|---|
@@ -20,25 +21,26 @@
 | 1 | コア：`Result` / 能力表 / `convert()` / 命名規則 | 完了 |
 | 2 | GUI：D&D / ジョブ一覧 / 設定パネル / 進捗 / キャンセル / 結果表示 | **完了（下記 2 点を除く）** |
 | 3 | 拡張コーデック：AVIF / JPEG XL / PSD / RAW（オプショナル依存） | **完了（macOS のみ。下記参照）** |
-| 4 | 配布：`macdeployqt` / `windeployqt` / 署名・公証 / インストーラ | **実施中（受け入れ基準 5 件中 3 件が達成）** |
+| 4 | 配布：`macdeployqt` / `windeployqt` / 署名（公証は任意） / インストーラ | **実施中（受け入れ 5 件中 4 件達成・1 件は macOS 実機待ち）** |
 
 ### 未確認・未対応の項目（正直に記載する）
 
 - **キーボードのみでの開始・キャンセル** — タブ順の連結と到達可能性は自動テスト済みだが、
   マウス無しでの実操作は未確認
-- **Windows での実機起動** — CI では通っているが、実機での起動は未確認
+- **Windows での実機起動** — **必須としない**（2026-08-17）。CI の機械検査（P9 / `package`）で
+  受け入れ基準 5 の Windows 側は足りる、と決めた。実機での感触は未確認のまま残す
 - **Windows での追加コーデック** — 未対応。`KATACHI_EXTRA_CODECS=ON` の CI ジョブは macOS のみ
 - **追加コーデック ON でのアプリ実機起動** — 未確認。ビルドとテストが通ることのみ確認済み
 - **HEIF** — 自前導入は対象外。macOS は `qmacheif`（Qt 同梱）で読み書き可、Windows は使えないまま
-- **macOS の公証** — **未実施。** Developer ID での署名までは済んでいるが、公証していないため
-  Gatekeeper は `Unnotarized Developer ID` を返す
-- **クリーンな環境での起動** — **未確認。** 機械的な代替（Qt の環境変数を除いた起動、
-  依存解決の検査）は CI で走っているが、**Qt を持たない実機での起動は確かめていない**
+- **macOS の公証** — **任意。** Developer ID 署名までが必須。未公証のため Gatekeeper は
+  `Unnotarized Developer ID` を返す（失敗ではなく正しい状態）。開き方は下記「配布物」を参照
+- **macOS のクリーンな環境での起動** — **未確認（受け入れ基準 5 の残り）。**
+  Qt を持たない別アカウントでの実機確認がまだである。CI の P8 は代替にしない
 - **仮想キーボードを外した影響** — 配布物から `platforminputcontexts` を削っている。
   macOS の日本語入力は `cocoa` プラグインが担うため影響しないと考えているが、
   **実機で日本語を打って確かめていない**
 
-**CI の成功や自動テストの結果を実機操作の根拠にはしない。**
+**macOS については、CI の成功や自動テストの結果を実機操作の根拠にはしない。**
 
 ---
 
@@ -187,7 +189,7 @@ cmake --preset asan && ctest --preset asan
 | [`docs/phases.md`](docs/phases.md) | Phase 分割・受け入れ基準・品質ゲート |
 | [`docs/agent-protocol.md`](docs/agent-protocol.md) | 報告書式・サブエージェント・曖昧さの解決順序 |
 | [`docs/licenses.md`](docs/licenses.md) | 本体と依存物のライセンス条件 |
-| [`docs/release.md`](docs/release.md) | 配布物の作り方・署名・公証・検証の手順 |
+| [`docs/release.md`](docs/release.md) | 配布物の作り方・署名・（任意の）公証・未公証時の開き方・検証の手順 |
 | [`docs/adr/`](docs/adr/) | 設計判断の記録（ADR-0001〜0016） |
 | [`docs/progress/`](docs/progress/) | Phase ごとの実施記録（**追記のみ**） |
 
@@ -238,8 +240,23 @@ Qt 同梱の画像フォーマットプラグインは libjpeg-turbo / libtiff /
 
 | OS | 形式 | 状態 |
 |---|---|---|
-| macOS 13 以上 | `.dmg`（universal: x86_64 + arm64） | **Developer ID 署名済み・未公証** |
+| macOS 13 以上 | `.dmg`（universal: x86_64 + arm64） | **Developer ID 署名済み・未公証（公証は任意）** |
 | Windows 10 以上 (x64) | ポータブル zip / インストーラ | **未署名**（SmartScreen の警告が出ます） |
+
+### 未公証の macOS 配布物を開くとき
+
+Gatekeeper は `Unnotarized Developer ID` と判定します。これは署名の失敗ではなく、
+**公証していない Developer ID 配布として正しい状態**です。
+
+1. Finder でアプリを **右クリック →「開く」**（ダブルクリックだけでは拒否されることがあります）
+2. ダイアログで再度「開く」を選ぶ
+3. それでも開かない場合:
+
+```bash
+xattr -d com.apple.quarantine /Applications/Katachi.app
+```
+
+詳細は [`docs/release.md`](docs/release.md) §3.0。
 
 ### 同梱するもの・しないもの
 
